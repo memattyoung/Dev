@@ -1,7 +1,7 @@
 <?php
 // === CONFIG: put your RDS info here ===
 $dbHost = "browns-test.cr4wimy2q8ur.us-east-2.rds.amazonaws.com";
-$dbName = "browns-test";
+$dbName = "Browns-test";
 $dbUser = "Tuna";
 $dbPass = "TunaMarie123";
 
