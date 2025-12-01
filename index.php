@@ -1,10 +1,9 @@
 <?php
 // === CONFIG: put your RDS info here ===
 $dbHost = "browns-test.cr4wimy2q8ur.us-east-2.rds.amazonaws.com";
-$dbName = "Browns-test";
-$dbUser = "Tuna";
-$dbPass = "TunaMarie123";
-
+$dbName = "browns-test";
+$dbUser = "memattyoung";
+$dbPass = "Myoung0996!";
 // Simple "password" for managers to access page (not fancy, but easy)
 $appPassword = "GoldFish";
 
