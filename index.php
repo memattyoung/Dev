@@ -27,7 +27,7 @@ if (!isset($_SESSION['logged_in'])) {
         <title>Login</title>
     </head>
     <body style="font-family:sans-serif; max-width:400px; margin:40px auto;">
-        <h2>Manager Login</h2>
+        <h2>Enter Password Tuna Marie</h2>
         <?php if (!empty($error)) echo "<p style='color:red;'>$error</p>"; ?>
         <form method="post">
             <label>Password:</label><br>
