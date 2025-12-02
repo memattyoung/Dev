@@ -243,7 +243,7 @@ if ($view === 'sell') {
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Current Browns Portal</title>
+    <title>Browns Towing Battery Program</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {
@@ -488,7 +488,7 @@ if ($view === 'sell') {
                 </button>
             </form>
             <p class="mt-6" style="font-size:12px; color:#6b7280;">
-                Only batteries with <strong>Location &lt;&gt; 'SOLD'</strong> are eligible.
+                Only batteries not previously <strong>SOLD</strong> are eligible.
             </p>
         </div>
 
