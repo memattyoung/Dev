@@ -1,16 +1,20 @@
 <?php
-// === CONFIG: put your RDS info here ===
+// ===== CONFIG =====
 $dbHost = "browns-test.cr4wimy2q8ur.us-east-2.rds.amazonaws.com";
 $dbName = "Browns";
 $dbUser = "memattyoung";
 $dbPass = "Myoung0996!";
 
-// Simple "password" for managers to access page (not fancy, but easy)
+// Simple "password" for managers to access page
 $appPassword = "GoldFish";
 
-// --- Basic login gate ---
+// Start session
 session_start();
+
+// ===== LOGIN GATE (NO OUTPUT BEFORE THIS POINT) =====
 if (!isset($_SESSION['logged_in'])) {
+    $error = "";
+
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($_POST['password']) && $_POST['password'] === $appPassword) {
             $_SESSION['logged_in'] = true;
@@ -29,10 +33,13 @@ if (!isset($_SESSION['logged_in'])) {
     </head>
     <body style="font-family:sans-serif; max-width:400px; margin:40px auto;">
         <h2>Enter Password Tuna Marie</h2>
-        <?php if (!empty($error)) echo "<p style='color:red;'>$error</p>"; ?>
+        <?php if (!empty($error)): ?>
+            <p style='color:red;'><?= htmlspecialchars($error) ?></p>
+        <?php endif; ?>
         <form method="post">
             <label>Password:</label><br>
-            <input type="password" name="password" style="width:100%; padding:8px; margin:8px 0;">
+            <input type="password" name="password"
+                   style="width:100%; padding:8px; margin:8px 0;">
             <button type="submit" style="width:100%; padding:10px;">Enter</button>
         </form>
     </body>
@@ -41,9 +48,7 @@ if (!isset($_SESSION['logged_in'])) {
     exit;
 }
 
-// --- If we're here, user is logged in ---
-
-// Connect to DB
+// ===== CONNECT TO DB =====
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
 
 try {
@@ -54,118 +59,50 @@ try {
     die("DB connection failed: " . htmlspecialchars($e->getMessage()));
 }
 
-// Determine which page we are on
-$page = $_GET['page'] ?? 'menu';
+// ===== ROUTING / STATE =====
+$view = $_GET['view'] ?? 'menu';   // menu | inventory | sell | add | remove
+$msg  = $_GET['msg']  ?? '';
 
-// Small helper: header/footer HTML
-function render_header($title = "Browns Battery") {
-    ?>
-    <!doctype html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title><?= htmlspecialchars($title) ?></title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-            body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 10px; }
-            h2 { text-align: center; }
-            .btn {
-                display: block;
-                width: 100%;
-                padding: 12px;
-                margin: 8px 0;
-                text-align: center;
-                background: #2563eb;
-                color: white;
-                text-decoration: none;
-                border-radius: 6px;
-                border: none;
-                font-size: 16px;
-            }
-            .btn-secondary {
-                background: #6b7280;
-            }
-            .container {
-                max-width: 800px;
-                margin: 0 auto;
-            }
-            table { width: 100%; border-collapse: collapse; font-size: 14px; }
-            th, td { border: 1px solid #ddd; padding: 6px; }
-            th { background: #f3f4f6; position: sticky; top: 0; }
-            .table-container { max-height: 70vh; overflow-y: auto; }
-            label { display:block; margin-top:8px; }
-            input[type="text"], select {
-                width: 100%;
-                padding: 8px;
-                margin-top: 4px;
-                box-sizing: border-box;
-            }
-            .message {
-                margin: 10px 0;
-                padding: 10px;
-                border-radius: 4px;
-            }
-            .message-success { background:#dcfce7; color:#166534; }
-            .message-error { background:#fee2e2; color:#991b1b; }
-        </style>
-    </head>
-    <body>
-    <div class="container">
-    <?php
-}
+/**
+ * We’ll pre-declare section vars so they exist when we render HTML.
+ * - Inventory section: $invRows, $allLocations, $allBatteries
+ * - Sell section: $sellError, $sellInfo
+ */
+$invRows       = [];
+$allLocations  = [];
+$allBatteries  = [];
+$sellError     = "";
+$sellInfo      = null;
 
-function render_footer() {
-    ?>
-    </div>
-    </body>
-    </html>
-    <?php
-}
+// ===== INVENTORY SECTION: BUILD DATA IF NEEDED =====
+if ($view === 'inventory') {
+    // Filters from GET
+    $selectedLocation = isset($_GET['loc']) ? trim($_GET['loc']) : '';
+    $selectedBattery  = isset($_GET['bat']) ? trim($_GET['bat']) : '';
 
-// --- MENU PAGE ---
-if ($page === 'menu') {
-    render_header("Browns Battery - Menu");
+    // 1) Get all unique Batteries & Locations for dropdowns
+    $sqlAll = "
+        SELECT 
+            Battery.Battery AS Battery,
+            Inventory.Location AS Location
+        FROM Battery
+        JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
+        GROUP BY Battery.Battery, Inventory.Location
+        ORDER BY Battery.Battery, Inventory.Location
+    ";
+    $stmtAll = $pdo->query($sqlAll);
+    $allRows = $stmtAll->fetchAll(PDO::FETCH_ASSOC);
 
-    if (!empty($_GET['msg'])) {
-        echo '<div class="message message-success">'.htmlspecialchars($_GET['msg']).'</div>';
+    foreach ($allRows as $row) {
+        if (!in_array($row['Location'], $allLocations, true)) {
+            $allLocations[] = $row['Location'];
+        }
+        if (!in_array($row['Battery'], $allBatteries, true)) {
+            $allBatteries[] = $row['Battery'];
+        }
     }
-    ?>
-    <h2>Main Menu</h2>
-    <a class="btn" href="?page=inventory">Inventory</a>
-    <a class="btn" href="?page=sell">Sell Battery</a>
-    <a class="btn btn-secondary" href="?page=add">Add Battery</a>
-    <a class="btn btn-secondary" href="?page=remove">Remove Battery</a>
-    <?php
-    render_footer();
-    exit;
-}
 
-// --- INVENTORY PAGE ---
-if ($page === 'inventory') {
-    render_header("Inventory");
-
-    // Filters
-    $filterLocation = $_GET['location'] ?? '';
-    $filterBattery  = $_GET['battery'] ?? '';
-
-    // Get dropdown options from current data
-    $locStmt = $pdo->query("
-        SELECT DISTINCT Inventory.Location AS Location
-        FROM Battery
-        JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
-        ORDER BY Inventory.Location
-    ");
-    $locations = $locStmt->fetchAll(PDO::FETCH_COLUMN);
-
-    $batStmt = $pdo->query("
-        SELECT DISTINCT Battery.Battery AS Battery
-        FROM Battery
-        JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
-        ORDER BY Battery.Battery
-    ");
-    $batteries = $batStmt->fetchAll(PDO::FETCH_COLUMN);
-
-    // Build main query
+    // 2) Main aggregated query with filters
     $sql = "
         SELECT 
             Battery.Battery AS Battery,
@@ -175,239 +112,421 @@ if ($page === 'inventory') {
         JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
         WHERE 1=1
     ";
-
     $params = [];
 
-    if ($filterLocation !== '') {
+    if ($selectedLocation !== '') {
         $sql .= " AND Inventory.Location = :loc";
-        $params[':loc'] = $filterLocation;
+        $params[':loc'] = $selectedLocation;
     }
-    if ($filterBattery !== '') {
+    if ($selectedBattery !== '') {
         $sql .= " AND Battery.Battery = :bat";
-        $params[':bat'] = $filterBattery;
+        $params[':bat'] = $selectedBattery;
     }
 
-    $sql .= " GROUP BY Battery.Battery, Inventory.Location
-              ORDER BY Battery.Battery, Inventory.Location";
+    $sql .= "
+        GROUP BY Battery.Battery, Inventory.Location
+        ORDER BY Battery.Battery, Inventory.Location
+    ";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    ?>
-    <h2>Inventory</h2>
-    <form method="get" style="margin-bottom:10px;">
-        <input type="hidden" name="page" value="inventory">
-        <label>
-            Location:
-            <select name="location">
-                <option value="">(All)</option>
-                <?php foreach ($locations as $loc): ?>
-                    <option value="<?= htmlspecialchars($loc) ?>"
-                        <?= $filterLocation === $loc ? 'selected' : '' ?>>
-                        <?= htmlspecialchars($loc) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-        </label>
-        <label>
-            Battery:
-            <select name="battery">
-                <option value="">(All)</option>
-                <?php foreach ($batteries as $bat): ?>
-                    <option value="<?= htmlspecialchars($bat) ?>"
-                        <?= $filterBattery === $bat ? 'selected' : '' ?>>
-                        <?= htmlspecialchars($bat) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-        </label>
-        <button type="submit" class="btn" style="margin-top:10px;">Apply Filters</button>
-        <a href="?page=menu" class="btn btn-secondary">Back to Menu</a>
-    </form>
-
-    <div class="table-container">
-        <table>
-            <tr>
-                <th>Battery</th>
-                <th>Quantity</th>
-                <th>Location</th>
-            </tr>
-            <?php foreach ($rows as $r): ?>
-                <tr>
-                    <td><?= htmlspecialchars($r['Battery'] ?? '') ?></td>
-                    <td><?= htmlspecialchars($r['Quantity'] ?? '') ?></td>
-                    <td><?= htmlspecialchars($r['Location'] ?? '') ?></td>
-                </tr>
-            <?php endforeach; ?>
-        </table>
-    </div>
-    <?php
-    render_footer();
-    exit;
+    $invRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// --- SELL BATTERY PAGE ---
-if ($page === 'sell') {
-    render_header("Sell Battery");
-
-    $step = $_POST['step'] ?? 'lookup';
-    $message = '';
-    $error = '';
-    $foundRow = null;
-
+// ===== SELL BATTERY SECTION: HANDLE POST / LOOKUP / SELL =====
+if ($view === 'sell') {
+    // We’ll handle both the lookup and the final sell here before HTML.
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-        // STEP 1: LOOKUP
-        if ($step === 'lookup') {
-            $batteryIdInput = trim($_POST['batteryid'] ?? '');
+        // Step 1: Lookup by BatteryID
+        if (isset($_POST['lookup_battery'])) {
+            $inputId = trim($_POST['battery_id'] ?? '');
 
-            if ($batteryIdInput === '') {
-                $error = "Please enter a BatteryID.";
+            if ($inputId === '') {
+                $sellError = "Please enter a BatteryID.";
             } else {
                 $sql = "
                     SELECT 
                         Battery.BatteryID,
                         Battery.Battery,
                         Battery.DateCode,
-                        Inventory.Location AS Location
+                        Inventory.Location
                     FROM Battery
-                    JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
+                    JOIN Inventory 
+                      ON Battery.BatteryID = Inventory.BatteryID
                     WHERE Battery.BatteryID = :bid
+                      AND Inventory.Location <> 'SOLD'
                 ";
                 $stmt = $pdo->prepare($sql);
-                $stmt->execute([':bid' => $batteryIdInput]);
-                $foundRow = $stmt->fetch(PDO::FETCH_ASSOC);
+                $stmt->execute([':bid' => $inputId]);
+                $sellInfo = $stmt->fetch(PDO::FETCH_ASSOC);
 
-                if (!$foundRow) {
-                    $error = "BatteryID not found.";
+                if (!$sellInfo) {
+                    $sellError = "Battery not found, or it is already SOLD.";
                 }
             }
+        }
 
-        // STEP 2: CONFIRM SELL
-        } elseif ($step === 'sell') {
-            $batteryId = $_POST['BatteryID'] ?? '';
-            $battery   = $_POST['Battery'] ?? '';
-            $dateCode  = $_POST['DateCode'] ?? '';
-            $location  = $_POST['Location'] ?? '';
+        // Step 2: Confirm sale
+        elseif (isset($_POST['confirm_sell'])) {
+            $bid = trim($_POST['battery_id'] ?? '');
 
-            if ($batteryId === '' || $location === '') {
-                $error = "Missing BatteryID or Location.";
+            if ($bid === '') {
+                $sellError = "Missing BatteryID.";
             } else {
-                try {
-                    $pdo->beginTransaction();
+                // Re-fetch latest info & ensure not already SOLD
+                $sql = "
+                    SELECT 
+                        Battery.BatteryID,
+                        Battery.Battery,
+                        Battery.DateCode,
+                        Inventory.Location
+                    FROM Battery
+                    JOIN Inventory 
+                      ON Battery.BatteryID = Inventory.BatteryID
+                    WHERE Battery.BatteryID = :bid
+                      AND Inventory.Location <> 'SOLD'
+                ";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([':bid' => $bid]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-                    // Update Inventory to SOLD
-                    $upd = $pdo->prepare("
-                        UPDATE Inventory
-                        SET Location = 'SOLD'
-                        WHERE BatteryID = :bid
-                          AND Location = :loc
-                        LIMIT 1
-                    ");
-                    $upd->execute([
-                        ':bid' => $batteryId,
-                        ':loc' => $location
-                    ]);
+                if (!$row) {
+                    $sellError = "Battery not found, or it is already SOLD.";
+                } else {
+                    try {
+                        $pdo->beginTransaction();
 
-                    if ($upd->rowCount() === 0) {
-                        // nothing updated
-                        $pdo->rollBack();
-                        $error = "No matching inventory record to update (maybe already SOLD).";
-                    } else {
-                        // Insert into AuditLog
-                        $ins = $pdo->prepare("
-                            INSERT INTO AuditLog
-                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type,
-                                 Invoice, Battery, DateCode, Reason, Location, Computer)
-                            VALUES
-                                ('WEBUSER', 'Tuna Marie', :fromloc, 'SOLD', :bid, 'BatterySale',
-                                 '', :battery, :datecode, '', :loc, 'MOBILE')
+                        $fromLoc = $row['Location'];
+
+                        // Update Inventory: mark SOLD
+                        $update = $pdo->prepare("
+                            UPDATE Inventory 
+                            SET Location = 'SOLD' 
+                            WHERE BatteryID = :bid
+                              AND Location <> 'SOLD'
                         ");
-                        $ins->execute([
-                            ':fromloc' => $location,
-                            ':bid'     => $batteryId,
-                            ':battery' => $battery,
-                            ':datecode'=> $dateCode,
-                            ':loc'     => $location
+                        $update->execute([':bid' => $bid]);
+
+                        // Insert AuditLog record
+                        $insert = $pdo->prepare("
+                            INSERT INTO AuditLog
+                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer)
+                            VALUES
+                                ('WEBUSER', 'Tuna Marie', :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', :fromLoc, 'MOBILE')
+                        ");
+                        $insert->execute([
+                            ':fromLoc'   => $fromLoc,
+                            ':batteryId' => $row['BatteryID'],
+                            ':battery'   => $row['Battery'],
+                            ':dateCode'  => $row['DateCode'],
                         ]);
 
                         $pdo->commit();
-                        // Redirect back to menu with message
-                        header("Location: ?page=menu&msg=" . urlencode("Battery $batteryId sold."));
-                        exit;
-                    }
 
-                } catch (Exception $ex) {
-                    if ($pdo->inTransaction()) {
+                        // Redirect back to menu with success message
+                        header("Location: " . $_SERVER['PHP_SELF'] . "?view=menu&msg=sold");
+                        exit;
+
+                    } catch (Exception $e) {
                         $pdo->rollBack();
+                        $sellError = "Error selling battery: " . $e->getMessage();
                     }
-                    $error = "Error selling battery: " . $ex->getMessage();
                 }
             }
         }
     }
+}
 
-    ?>
-    <h2>Sell Battery</h2>
+?>
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Current Browns Portal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 10px;
+            background: #f9fafb;
+        }
+        h1, h2 {
+            text-align: center;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .menu-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        @media (min-width: 600px) {
+            .menu-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        .btn {
+            display: inline-block;
+            text-align: center;
+            padding: 12px;
+            background: #2563eb;
+            color: #fff;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 16px;
+            border: none;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .btn-secondary {
+            background: #4b5563;
+        }
+        .btn:active {
+            transform: scale(0.98);
+        }
+        .card {
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-top: 12px;
+        }
+        .table-container {
+            max-height: 65vh;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th, td {
+            border: 1px solid #e5e7eb;
+            padding: 6px;
+        }
+        th {
+            background: #f3f4f6;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        .filter-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        @media (min-width: 600px) {
+            .filter-row {
+                flex-direction: row;
+                align-items: center;
+            }
+        }
+        select, input[type="text"] {
+            padding: 6px;
+            border-radius: 4px;
+            border: 1px solid #d1d5db;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .filters-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .text-center {
+            text-align: center;
+        }
+        .msg {
+            padding: 8px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .msg-success {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .msg-error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .label-block {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+        .mt-10 { margin-top: 10px; }
+        .mt-6 { margin-top: 6px; }
+    </style>
+</head>
+<body>
+<div class="container">
 
-    <?php if ($error): ?>
-        <div class="message message-error"><?= htmlspecialchars($error) ?></div>
+    <h1>Current Browns Portal</h1>
+
+    <?php if ($msg === 'sold'): ?>
+        <div class="msg msg-success">
+            Battery was successfully sold and logged.
+        </div>
     <?php endif; ?>
 
-    <?php
-    // If we have a found row from lookup, show confirmation screen
-    if ($step === 'lookup' && isset($foundRow) && $foundRow): ?>
-        <p>Please confirm you want to sell this battery:</p>
-        <table>
-            <tr><th>BatteryID</th><td><?= htmlspecialchars($foundRow['BatteryID']) ?></td></tr>
-            <tr><th>Battery</th><td><?= htmlspecialchars($foundRow['Battery']) ?></td></tr>
-            <tr><th>Date Code</th><td><?= htmlspecialchars($foundRow['DateCode']) ?></td></tr>
-            <tr><th>Location</th><td><?= htmlspecialchars($foundRow['Location']) ?></td></tr>
-        </table>
+    <?php if ($view === 'menu'): ?>
 
-        <form method="post" style="margin-top:10px;">
-            <input type="hidden" name="step" value="sell">
-            <input type="hidden" name="BatteryID" value="<?= htmlspecialchars($foundRow['BatteryID']) ?>">
-            <input type="hidden" name="Battery" value="<?= htmlspecialchars($foundRow['Battery']) ?>">
-            <input type="hidden" name="DateCode" value="<?= htmlspecialchars($foundRow['DateCode']) ?>">
-            <input type="hidden" name="Location" value="<?= htmlspecialchars($foundRow['Location']) ?>">
+        <h2>Main Menu</h2>
+        <div class="menu-grid">
+            <a class="btn" href="?view=inventory">Inventory</a>
+            <a class="btn" href="?view=sell">Sell Battery</a>
+            <a class="btn btn-secondary" href="?view=add">Add Battery</a>
+            <a class="btn btn-secondary" href="?view=remove">Remove Battery</a>
+        </div>
 
-            <button type="submit" class="btn">Confirm Sell</button>
-            <a href="?page=menu" class="btn btn-secondary">Cancel</a>
-        </form>
+        <div class="card">
+            <p class="text-center" style="font-size:13px; color:#6b7280;">
+                Use the buttons above to manage batteries.<br>
+                (Add/Remove Battery screens will be built later.)
+            </p>
+        </div>
+
+    <?php elseif ($view === 'inventory'): ?>
+
+        <h2>Inventory Summary</h2>
+        <div class="card">
+            <form method="get">
+                <input type="hidden" name="view" value="inventory">
+
+                <div class="filter-row">
+                    <div style="flex:1;">
+                        <label class="label-block">Location</label>
+                        <select name="loc">
+                            <option value="">All Locations</option>
+                            <?php foreach ($allLocations as $loc): ?>
+                                <option value="<?= htmlspecialchars($loc) ?>"
+                                    <?= ($loc === ($selectedLocation ?? '')) ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($loc) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <div style="flex:1;">
+                        <label class="label-block">Battery</label>
+                        <select name="bat">
+                            <option value="">All Batteries</option>
+                            <?php foreach ($allBatteries as $bat): ?>
+                                <option value="<?= htmlspecialchars($bat) ?>"
+                                    <?= ($bat === ($selectedBattery ?? '')) ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($bat) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="filters-actions">
+                    <button type="submit" class="btn">Apply Filters</button>
+                    <a class="btn btn-secondary" href="?view=inventory">Clear</a>
+                    <a class="btn btn-secondary" href="?view=menu">Menu</a>
+                </div>
+            </form>
+        </div>
+
+        <div class="card">
+            <div class="table-container">
+                <table>
+                    <tr>
+                        <th>Battery</th>
+                        <th>Quantity</th>
+                        <th>Location</th>
+                    </tr>
+                    <?php if (empty($invRows)): ?>
+                        <tr>
+                            <td colspan="3" class="text-center">No records found.</td>
+                        </tr>
+                    <?php else: ?>
+                        <?php foreach ($invRows as $r): ?>
+                            <tr>
+                                <td><?= htmlspecialchars($r['Battery'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($r['Quantity'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($r['Location'] ?? '') ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </table>
+            </div>
+        </div>
+
+    <?php elseif ($view === 'sell'): ?>
+
+        <h2>Sell a Battery</h2>
+
+        <div class="card">
+            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+        </div>
+
+        <?php if (!empty($sellError)): ?>
+            <div class="card msg msg-error">
+                <?= htmlspecialchars($sellError) ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- Step 1: Lookup BatteryID -->
+        <div class="card">
+            <form method="post">
+                <label class="label-block">BatteryID</label>
+                <input type="text" name="battery_id"
+                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                       placeholder="Enter BatteryID">
+
+                <button type="submit" name="lookup_battery" class="btn mt-10">
+                    Lookup Battery
+                </button>
+            </form>
+            <p class="mt-6" style="font-size:12px; color:#6b7280;">
+                Only batteries with <strong>Location &lt;&gt; 'SOLD'</strong> are eligible.
+            </p>
+        </div>
+
+        <!-- Step 2: If lookup succeeded, show info + confirm button -->
+        <?php if ($sellInfo): ?>
+            <div class="card">
+                <h3 style="margin-top:0;">Confirm Sale</h3>
+                <p><strong>BatteryID:</strong> <?= htmlspecialchars($sellInfo['BatteryID']) ?></p>
+                <p><strong>Battery:</strong> <?= htmlspecialchars($sellInfo['Battery']) ?></p>
+                <p><strong>Date Code:</strong> <?= htmlspecialchars($sellInfo['DateCode']) ?></p>
+                <p><strong>Location:</strong> <?= htmlspecialchars($sellInfo['Location']) ?></p>
+
+                <form method="post" class="mt-10">
+                    <input type="hidden" name="battery_id"
+                           value="<?= htmlspecialchars($sellInfo['BatteryID']) ?>">
+                    <button type="submit" name="confirm_sell" class="btn">
+                        Sell This Battery
+                    </button>
+                </form>
+            </div>
+        <?php endif; ?>
 
     <?php else: ?>
-        <!-- Lookup form -->
-        <form method="post">
-            <input type="hidden" name="step" value="lookup">
-            <label>
-                BatteryID:
-                <input type="text" name="batteryid" value="<?= htmlspecialchars($_POST['batteryid'] ?? '') ?>">
-            </label>
-            <button type="submit" class="btn" style="margin-top:10px;">Lookup Battery</button>
-            <a href="?page=menu" class="btn btn-secondary">Back to Menu</a>
-        </form>
+
+        <!-- Placeholder for Add / Remove until we build them -->
+        <h2>Coming Soon</h2>
+        <div class="card">
+            <p class="text-center">
+                This section is not built yet.<br>
+                Use the menu to go back.
+            </p>
+            <div class="mt-10 text-center">
+                <a class="btn" href="?view=menu">Back to Menu</a>
+            </div>
+        </div>
+
     <?php endif; ?>
 
-    <?php
-    render_footer();
-    exit;
-}
-
-// --- PLACEHOLDER PAGES FOR ADD / REMOVE (for later) ---
-if ($page === 'add' || $page === 'remove') {
-    $title = $page === 'add' ? "Add Battery" : "Remove Battery";
-    render_header($title);
-    ?>
-    <h2><?= htmlspecialchars($title) ?></h2>
-    <p>We will build this section later.</p>
-    <a href="?page=menu" class="btn btn-secondary">Back to Menu</a>
-    <?php
-    render_footer();
-    exit;
-}
-
-// Fallback
-render_header("Unknown Page");
-echo "<p>Unknown page.</p><a href='?page=menu' class='btn btn-secondary'>Back to Menu</a>";
-render_footer();
+</div>
+</body>
+</html>
