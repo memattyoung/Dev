@@ -8,7 +8,89 @@ $dbPass = "Myoung0996!";
 // Start session
 session_start();
 
-// ===== CONNECT TO DB (needed for login + app) =====
+// ===== LOGIN GATE (NO OUTPUT BEFORE THIS POINT) =====
+if (!isset($_SESSION['logged_in'])) {
+    $error = "";
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $aaa = trim($_POST['aaa'] ?? '');
+        $pwd = trim($_POST['password'] ?? '');
+
+        if ($aaa === '' || $pwd === '') {
+            $error = "Please enter both AAA and Password.";
+        } else {
+            try {
+                $dsnLogin = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
+                $pdoLogin = new PDO($dsnLogin, $dbUser, $dbPass, [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
+                ]);
+
+                $sqlEmp = "
+                    SELECT AAA, FirstName, LastName
+                    FROM Employee
+                    WHERE AAA = :aaa
+                      AND Password = :pwd
+                ";
+                $stmtEmp = $pdoLogin->prepare($sqlEmp);
+                $stmtEmp->execute([
+                    ':aaa' => $aaa,
+                    ':pwd' => $pwd
+                ]);
+                $emp = $stmtEmp->fetch(PDO::FETCH_ASSOC);
+
+                if ($emp) {
+                    $_SESSION['logged_in']  = true;
+                    $_SESSION['empAAA']     = $emp['AAA'];
+                    $_SESSION['empFirst']   = $emp['FirstName'];
+                    $_SESSION['empLast']    = $emp['LastName'];
+                    $_SESSION['empName']    = $emp['FirstName'] . " " . $emp['LastName'];
+
+                    header("Location: " . $_SERVER['PHP_SELF']);
+                    exit;
+                } else {
+                    $error = "Invalid AAA or Password.";
+                }
+
+            } catch (Exception $e) {
+                $error = "Login error: " . htmlspecialchars($e->getMessage());
+            }
+        }
+    }
+    ?>
+    <!doctype html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Browns Towing Battery Program Login</title>
+    </head>
+    <body style="font-family:sans-serif; max-width:400px; margin:40px auto;">
+        <h2 style="text-align:center;">Browns Towing Battery Program Login</h2>
+        <?php if (!empty($error)): ?>
+            <p style="color:red;"><?= htmlspecialchars($error) ?></p>
+        <?php endif; ?>
+        <form method="post">
+            <label>AAA:</label><br>
+            <input type="text" name="aaa"
+                   style="width:100%; padding:8px; margin:8px 0;"
+                   value="<?= isset($_POST['aaa']) ? htmlspecialchars($_POST['aaa']) : '' ?>">
+
+            <label>Password:</label><br>
+            <input type="password" name="password"
+                   style="width:100%; padding:8px; margin:8px 0;">
+
+            <button type="submit" style="width:100%; padding:10px;">Enter</button>
+        </form>
+    </body>
+    </html>
+    <?php
+    exit;
+}
+
+// ===== WE HAVE A LOGGED IN USER =====
+$empAAA  = $_SESSION['empAAA']  ?? 'WEBUSER';
+$empName = $_SESSION['empName'] ?? 'Tuna Marie';
+
+// ===== CONNECT TO DB =====
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
 
 try {
@@ -19,143 +101,16 @@ try {
     die("DB connection failed: " . htmlspecialchars($e->getMessage()));
 }
 
-// ===== LOGIN GATE USING AAA + PASSWORD =====
-if (!isset($_SESSION['logged_in'])) {
-    $error = "";
-    $step = $_POST['step'] ?? 'aaa';   // step: aaa → password
-
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
-        // ---- STEP 1: USER ENTERS AAA ----
-        if ($step === 'aaa') {
-            $aaa = trim($_POST['aaa'] ?? '');
-
-            if ($aaa === '') {
-                $error = "Please enter your AAA number.";
-            } else {
-                // Validate AAA exists
-                $stmt = $pdo->prepare("
-                    SELECT AAA, FirstName, LastName
-                    FROM Employee
-                    WHERE AAA = :aaa
-                    LIMIT 1
-                ");
-                $stmt->execute([':aaa' => $aaa]);
-                $emp = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                if ($emp) {
-                    // Store AAA temporarily for next step
-                    $_SESSION['pending_AAA']       = $emp['AAA'];
-                    $_SESSION['pending_FirstName'] = $emp['FirstName'];
-                    $_SESSION['pending_LastName']  = $emp['LastName'];
-                    $step = 'password'; // move to password step
-                } else {
-                    $error = "AAA number not found.";
-                }
-            }
-        }
-
-        // ---- STEP 2: USER ENTERS PASSWORD ----
-        elseif ($step === 'password') {
-            $pwd = trim($_POST['password'] ?? '');
-
-            if ($pwd === '') {
-                $error = "Please enter your password.";
-                $step = 'password';
-            } else {
-                $aaa = $_SESSION['pending_AAA'] ?? '';
-
-                $stmt = $pdo->prepare("
-                    SELECT AAA, FirstName, LastName 
-                    FROM Employee
-                    WHERE AAA = :aaa AND Password = :pwd
-                    LIMIT 1
-                ");
-                $stmt->execute([
-                    ':aaa' => $aaa,
-                    ':pwd' => $pwd
-                ]);
-                $emp = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                if ($emp) {
-                    // Successful login — finalize identity
-                    $_SESSION['logged_in'] = true;
-                    $_SESSION['AAA']       = $emp['AAA'];
-                    $_SESSION['FirstName'] = $emp['FirstName'];
-                    $_SESSION['LastName']  = $emp['LastName'];
-
-                    // Clear temporary session values
-                    unset($_SESSION['pending_AAA'], $_SESSION['pending_FirstName'], $_SESSION['pending_LastName']);
-
-                    header("Location: " . $_SERVER['PHP_SELF']);
-                    exit;
-                } else {
-                    $error = "Incorrect password.";
-                    $step = 'password';
-                }
-            }
-        }
-    }
-
-    ?>
-    <!doctype html>
-    <html>
-    <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Browns Towing Battery Program Login</title>
-    </head>
-    <body style="font-family:sans-serif; max-width:400px; margin:40px auto;">
-
-        <h2 style="text-align:center;">Browns Towing Battery Program Login</h2>
-
-        <?php if (!empty($error)): ?>
-            <p style='color:red;'><?= htmlspecialchars($error) ?></p>
-        <?php endif; ?>
-
-        <!-- STEP 1: ENTER AAA -->
-        <?php if ($step === 'aaa'): ?>
-            <form method="post">
-                <input type="hidden" name="step" value="aaa">
-
-                <label>AAA Number:</label><br>
-                <input type="text" name="aaa"
-                       style="width:100%; padding:8px; margin:8px 0;"
-                       placeholder="Enter your AAA">
-
-                <button type="submit" style="width:100%; padding:10px;">Next</button>
-            </form>
-        <?php endif; ?>
-
-        <!-- STEP 2: ENTER PASSWORD -->
-        <?php if ($step === 'password'): ?>
-            <p>Hello, <?= htmlspecialchars($_SESSION['pending_FirstName'] ?? '') ?> — please enter your password.</p>
-
-            <form method="post">
-                <input type="hidden" name="step" value="password">
-
-                <label>Password:</label><br>
-                <input type="password" name="password"
-                       style="width:100%; padding:8px; margin:8px 0;"
-                       placeholder="Enter password">
-
-                <button type="submit" style="width:100%; padding:10px;">Login</button>
-            </form>
-        <?php endif; ?>
-
-    </body>
-    </html>
-    <?php
-    exit;
-}
-
 // ===== ROUTING / STATE =====
-$view = $_GET['view'] ?? 'menu';   // menu | inventory | sell | transfer
+// views: menu | inventory | sell | transfer | scrap
+$view = $_GET['view'] ?? 'menu';
 $msg  = $_GET['msg']  ?? '';
 
 // Predeclare vars
 $invRows        = [];
 $allLocations   = [];
 $allBatteries   = [];
+
 $sellError      = "";
 $sellInfo       = null;
 
@@ -164,13 +119,15 @@ $transferPreview = null;
 $transferToLoc   = "";
 $destRows        = [];
 
-// ===== INVENTORY SECTION: BUILD DATA IF NEEDED =====
+$scrapError      = "";
+$scrapInfo       = null;
+
+// ===== INVENTORY SECTION =====
 if ($view === 'inventory') {
-    // Filters from GET
     $selectedLocation = isset($_GET['loc']) ? trim($_GET['loc']) : '';
     $selectedBattery  = isset($_GET['bat']) ? trim($_GET['bat']) : '';
 
-    // 1) Get all unique Batteries & Locations for dropdowns (excluding SOLD / SCRAPPED)
+    // Dropdown data (NO SOLD / SCRAPPED)
     $sqlAll = "
         SELECT 
             Battery.Battery AS Battery,
@@ -193,7 +150,7 @@ if ($view === 'inventory') {
         }
     }
 
-    // 2) Main aggregated query with filters (excluding SOLD / SCRAPPED)
+    // Aggregated query (NO SOLD / SCRAPPED)
     $sql = "
         SELECT 
             Battery.Battery AS Battery,
@@ -224,11 +181,11 @@ if ($view === 'inventory') {
     $invRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// ===== SELL BATTERY SECTION: HANDLE POST / LOOKUP / SELL =====
+// ===== SELL BATTERY SECTION =====
 if ($view === 'sell') {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-        // Step 1: Lookup by BatteryID
+        // Step 1: Lookup
         if (isset($_POST['lookup_battery'])) {
             $inputId = trim($_POST['battery_id'] ?? '');
 
@@ -264,7 +221,6 @@ if ($view === 'sell') {
             if ($bid === '') {
                 $sellError = "Missing BatteryID.";
             } else {
-                // Re-fetch latest info & ensure not already SOLD/SCRAPPED
                 $sql = "
                     SELECT 
                         Battery.BatteryID,
@@ -287,11 +243,9 @@ if ($view === 'sell') {
                     try {
                         $pdo->beginTransaction();
 
-                        $fromLoc   = $row['Location'];
-                        $empId     = $_SESSION['AAA']        ?? 'WEBUSER';
-                        $empName   = ($_SESSION['FirstName'] ?? 'Tuna') . ' ' . ($_SESSION['LastName'] ?? 'Marie');
+                        $fromLoc = $row['Location'];
 
-                        // Update Inventory: mark SOLD
+                        // Update Inventory
                         $update = $pdo->prepare("
                             UPDATE Inventory 
                             SET Location = 'SOLD' 
@@ -300,7 +254,7 @@ if ($view === 'sell') {
                         ");
                         $update->execute([':bid' => $bid]);
 
-                        // Insert AuditLog record
+                        // Insert AuditLog
                         $insert = $pdo->prepare("
                             INSERT INTO AuditLog
                                 (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer)
@@ -308,12 +262,12 @@ if ($view === 'sell') {
                                 (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', :fromLoc, 'MOBILE')
                         ");
                         $insert->execute([
-                            ':empId'     => $empId,
-                            ':empName'   => $empName,
-                            ':fromLoc'   => $fromLoc,
-                            ':batteryId' => $row['BatteryID'],
-                            ':battery'   => $row['Battery'],
-                            ':dateCode'  => $row['DateCode'],
+                            ':empId'    => $empAAA,
+                            ':empName'  => $empName,
+                            ':fromLoc'  => $fromLoc,
+                            ':batteryId'=> $row['BatteryID'],
+                            ':battery'  => $row['Battery'],
+                            ':dateCode' => $row['DateCode'],
                         ]);
 
                         $pdo->commit();
@@ -333,7 +287,7 @@ if ($view === 'sell') {
 
 // ===== TRANSFER BATTERY SECTION =====
 if ($view === 'transfer') {
-    // 1) Build combined destination list: shops first, then trucks, each group descending
+    // Build combined destination list: shops + trucks
     $stmtDest = $pdo->query("
         SELECT Location AS ToLoc, 'SHOP' AS Type
         FROM Location
@@ -344,19 +298,16 @@ if ($view === 'transfer') {
     ");
     $rowsDest = $stmtDest->fetchAll(PDO::FETCH_ASSOC);
 
-    // Deduplicate by ToLoc but keep first Type encountered (SHOP should appear first)
     $seen = [];
     foreach ($rowsDest as $r) {
         $loc  = trim($r['ToLoc'] ?? '');
         $type = $r['Type'] ?? 'TRUCK';
         if ($loc === '') continue;
-
         if (!isset($seen[$loc])) {
             $seen[$loc] = $type;
         }
     }
 
-    // Build array of [ToLoc, Type]
     foreach ($seen as $loc => $type) {
         $destRows[] = [
             'ToLoc' => $loc,
@@ -367,10 +318,9 @@ if ($view === 'transfer') {
     // Sort: shops first, then trucks; each group descending by name
     usort($destRows, function($a, $b) {
         if ($a['Type'] !== $b['Type']) {
-            return ($a['Type'] === 'SHOP') ? -1 : 1; // SHOP first
+            return ($a['Type'] === 'SHOP') ? -1 : 1;
         }
-        // Within same type, descending alpha
-        return strcasecmp($b['ToLoc'], $a['ToLoc']) * -1;
+        return strcasecmp($b['ToLoc'], $a['ToLoc']);
     });
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -386,7 +336,6 @@ if ($view === 'transfer') {
             } elseif ($transferTo === '') {
                 $transferError = "Please select a destination.";
             } else {
-                // Lookup current battery info, must not be SOLD/SCRAPPED
                 $sql = "
                     SELECT 
                         Battery.BatteryID,
@@ -409,7 +358,7 @@ if ($view === 'transfer') {
                     $fromLoc = $row['Location'];
 
                     if ($fromLoc === $transferTo) {
-                        $transferError = "BatteryID already at that location.";
+                        $transferError = "BatteryID already at location.";
                     } else {
                         $transferPreview = [
                             'BatteryID' => $row['BatteryID'],
@@ -434,14 +383,13 @@ if ($view === 'transfer') {
             if ($bid === '' || $fromLoc === '' || $toLoc === '') {
                 $transferError = "Missing transfer data. Please try again.";
             } elseif ($fromLoc === $toLoc) {
-                $transferError = "BatteryID already at that location.";
+                $transferError = "BatteryID already at location.";
             } else {
                 try {
                     $pdo->beginTransaction();
 
-                    // Double-check it's still not SOLD/SCRAPPED and still at fromLoc
                     $check = $pdo->prepare("
-                        SELECT Location
+                        SELECT Inventory.Location
                         FROM Inventory
                         WHERE BatteryID = :bid
                           AND Location NOT IN ('SOLD','SCRAPPED')
@@ -464,10 +412,6 @@ if ($view === 'transfer') {
                             ':bid'   => $bid
                         ]);
 
-                        // Prepare employee info
-                        $empId   = $_SESSION['AAA']        ?? 'WEBUSER';
-                        $empName = ($_SESSION['FirstName'] ?? 'Tuna') . ' ' . ($_SESSION['LastName'] ?? 'Marie');
-
                         // Insert AuditLog
                         $insert = $pdo->prepare("
                             INSERT INTO AuditLog
@@ -476,13 +420,13 @@ if ($view === 'transfer') {
                                 (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', :fromLoc, 'MOBILE')
                         ");
                         $insert->execute([
-                            ':empId'     => $empId,
-                            ':empName'   => $empName,
-                            ':fromLoc'   => $fromLoc,
-                            ':toLoc'     => $toLoc,
-                            ':batteryId' => $bid,
-                            ':battery'   => $battery,
-                            ':dateCode'  => $dateCode,
+                            ':empId'    => $empAAA,
+                            ':empName'  => $empName,
+                            ':fromLoc'  => $fromLoc,
+                            ':toLoc'    => $toLoc,
+                            ':batteryId'=> $bid,
+                            ':battery'  => $battery,
+                            ':dateCode' => $dateCode,
                         ]);
 
                         $pdo->commit();
@@ -494,6 +438,125 @@ if ($view === 'transfer') {
                 } catch (Exception $e) {
                     $pdo->rollBack();
                     $transferError = "Error transferring battery: " . $e->getMessage();
+                }
+            }
+        }
+    }
+}
+
+// ===== SCRAP BATTERY SECTION =====
+if ($view === 'scrap') {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+        // Step 1: Lookup battery
+        if (isset($_POST['lookup_battery'])) {
+            $inputId = trim($_POST['battery_id'] ?? '');
+
+            if ($inputId === '') {
+                $scrapError = "Please enter a BatteryID.";
+            } else {
+                $sql = "
+                    SELECT 
+                        Battery.BatteryID,
+                        Battery.Battery,
+                        Battery.DateCode,
+                        Inventory.Location
+                    FROM Battery
+                    JOIN Inventory 
+                      ON Battery.BatteryID = Inventory.BatteryID
+                    WHERE Battery.BatteryID = :bid
+                      AND Inventory.Location NOT IN ('SOLD','SCRAPPED')
+                ";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([':bid' => $inputId]);
+                $scrapInfo = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if (!$scrapInfo) {
+                    $scrapError = "Battery not found, or it is already SOLD/SCRAPPED.";
+                }
+            }
+        }
+
+        // Step 2: Confirm scrap
+        elseif (isset($_POST['confirm_scrap'])) {
+            $bid       = trim($_POST['battery_id'] ?? '');
+            $reasonRaw = $_POST['reason'] ?? '';
+
+            // We’ll requery battery info for safety
+            if ($bid === '') {
+                $scrapError = "Missing BatteryID.";
+            } else {
+                $sql = "
+                    SELECT 
+                        Battery.BatteryID,
+                        Battery.Battery,
+                        Battery.DateCode,
+                        Inventory.Location
+                    FROM Battery
+                    JOIN Inventory 
+                      ON Battery.BatteryID = Inventory.BatteryID
+                    WHERE Battery.BatteryID = :bid
+                      AND Inventory.Location NOT IN ('SOLD','SCRAPPED')
+                ";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([':bid' => $bid]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if (!$row) {
+                    $scrapError = "Battery not found, or it is already SOLD/SCRAPPED.";
+                } else {
+                    // Validate reason
+                    $reasonTrim  = trim($reasonRaw);
+                    if ($reasonTrim === '') {
+                        $scrapError = "Reason is required to scrap a battery.";
+                        $scrapInfo  = $row; // keep display
+                    } else {
+                        // Clean reason: remove single quotes & limit to 255 chars
+                        $reasonClean = str_replace("'", "", $reasonTrim);
+                        $reasonClean = mb_substr($reasonClean, 0, 255);
+
+                        try {
+                            $pdo->beginTransaction();
+
+                            $fromLoc = $row['Location'];
+
+                            // Update Inventory to SCRAPPED
+                            $update = $pdo->prepare("
+                                UPDATE Inventory 
+                                SET Location = 'SCRAPPED'
+                                WHERE BatteryID = :bid
+                                  AND Location NOT IN ('SOLD','SCRAPPED')
+                            ");
+                            $update->execute([':bid' => $bid]);
+
+                            // Insert AuditLog (ToLoc = SCRAPPED, Reason = user text)
+                            $insert = $pdo->prepare("
+                                INSERT INTO AuditLog
+                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer)
+                                VALUES
+                                    (:empId, :empName, :fromLoc, 'SCRAPPED', :batteryId, 'Scrap', '', :battery, :dateCode, :reason, :fromLoc, 'MOBILE')
+                            ");
+                            $insert->execute([
+                                ':empId'    => $empAAA,
+                                ':empName'  => $empName,
+                                ':fromLoc'  => $fromLoc,
+                                ':batteryId'=> $row['BatteryID'],
+                                ':battery'  => $row['Battery'],
+                                ':dateCode' => $row['DateCode'],
+                                ':reason'   => $reasonClean,
+                            ]);
+
+                            $pdo->commit();
+
+                            header("Location: " . $_SERVER['PHP_SELF'] . "?view=menu&msg=scrapped");
+                            exit;
+
+                        } catch (Exception $e) {
+                            $pdo->rollBack();
+                            $scrapError = "Error scrapping battery: " . $e->getMessage();
+                            $scrapInfo  = $row;
+                        }
+                    }
                 }
             }
         }
@@ -529,7 +592,7 @@ if ($view === 'transfer') {
         }
         @media (min-width: 600px) {
             .menu-grid {
-                grid-template-columns: repeat(3, 1fr);
+                grid-template-columns: repeat(4, 1fr);
             }
         }
         .btn {
@@ -589,12 +652,16 @@ if ($view === 'transfer') {
                 align-items: center;
             }
         }
-        select, input[type="text"] {
+        select, input[type="text"], textarea {
             padding: 6px;
             border-radius: 4px;
             border: 1px solid #d1d5db;
             width: 100%;
             box-sizing: border-box;
+        }
+        textarea {
+            min-height: 80px;
+            resize: vertical;
         }
         .filters-actions {
             display: flex;
@@ -624,7 +691,11 @@ if ($view === 'transfer') {
             font-weight: 600;
         }
         .mt-10 { margin-top: 10px; }
-        .mt-6 { margin-top: 6px; }
+        .mt-6  { margin-top: 6px; }
+        .small-note {
+            font-size: 12px;
+            color: #6b7280;
+        }
     </style>
 </head>
 <body>
@@ -640,6 +711,10 @@ if ($view === 'transfer') {
         <div class="msg msg-success">
             Battery was successfully transferred and logged.
         </div>
+    <?php elseif ($msg === 'scrapped'): ?>
+        <div class="msg msg-success">
+            Battery was successfully scrapped and logged.
+        </div>
     <?php endif; ?>
 
     <?php if ($view === 'menu'): ?>
@@ -649,10 +724,12 @@ if ($view === 'transfer') {
             <a class="btn" href="?view=inventory">Inventory</a>
             <a class="btn" href="?view=sell">Sell Battery</a>
             <a class="btn" href="?view=transfer">Transfer Battery</a>
+            <a class="btn" href="?view=scrap">Scrap Battery</a>
         </div>
 
         <div class="card">
             <p class="text-center" style="font-size:13px; color:#6b7280;">
+                Logged in as <strong><?= htmlspecialchars($empName) ?></strong> (<?= htmlspecialchars($empAAA) ?>).<br>
                 Use the buttons above to manage batteries.
             </p>
         </div>
@@ -739,7 +816,7 @@ if ($view === 'transfer') {
             </div>
         <?php endif; ?>
 
-        <!-- Step 1: Lookup BatteryID -->
+        <!-- Step 1: Lookup -->
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
@@ -751,12 +828,12 @@ if ($view === 'transfer') {
                     Lookup Battery
                 </button>
             </form>
-            <p class="mt-6" style="font-size:12px; color:#6b7280;">
+            <p class="mt-6 small-note">
                 Only batteries not previously <strong>SOLD</strong> or <strong>SCRAPPED</strong> are eligible.
             </p>
         </div>
 
-        <!-- Step 2: If lookup succeeded, show info + confirm button -->
+        <!-- Step 2: Confirm Sale -->
         <?php if ($sellInfo): ?>
             <div class="card">
                 <h3 style="margin-top:0;">Confirm Sale</h3>
@@ -817,12 +894,12 @@ if ($view === 'transfer') {
                 </button>
             </form>
 
-            <p class="mt-6" style="font-size:12px; color:#6b7280;">
+            <p class="mt-6 small-note">
                 Only batteries not <strong>SOLD</strong> or <strong>SCRAPPED</strong> can be transferred.
             </p>
         </div>
 
-        <!-- Step 2: Preview summary + confirm -->
+        <!-- Step 2: Preview + Confirm -->
         <?php if ($transferPreview): ?>
             <div class="card">
                 <h3 style="margin-top:0;">Confirm Transfer</h3>
@@ -848,6 +925,65 @@ if ($view === 'transfer') {
                         Confirm Transfer
                     </button>
                 </form>
+            </div>
+        <?php endif; ?>
+
+    <?php elseif ($view === 'scrap'): ?>
+
+        <h2>Scrap a Battery</h2>
+
+        <div class="card">
+            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+        </div>
+
+        <?php if (!empty($scrapError)): ?>
+            <div class="card msg msg-error">
+                <?= htmlspecialchars($scrapError) ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- Step 1: Lookup -->
+        <div class="card">
+            <form method="post">
+                <label class="label-block">BatteryID</label>
+                <input type="text" name="battery_id"
+                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                       placeholder="Enter BatteryID">
+
+                <button type="submit" name="lookup_battery" class="btn mt-10">
+                    Lookup Battery
+                </button>
+            </form>
+            <p class="mt-6 small-note">
+                Only batteries not <strong>SOLD</strong> or <strong>SCRAPPED</strong> can be scrapped.
+            </p>
+        </div>
+
+        <!-- Step 2: Confirm Scrap + Reason -->
+        <?php if ($scrapInfo): ?>
+            <div class="card">
+                <h3 style="margin-top:0;">Confirm Scrap</h3>
+                <p><strong>BatteryID:</strong> <?= htmlspecialchars($scrapInfo['BatteryID']) ?></p>
+                <p><strong>Battery:</strong> <?= htmlspecialchars($scrapInfo['Battery']) ?></p>
+                <p><strong>Date Code:</strong> <?= htmlspecialchars($scrapInfo['DateCode']) ?></p>
+                <p><strong>Current Location:</strong> <?= htmlspecialchars($scrapInfo['Location']) ?></p>
+
+                <form method="post" class="mt-10">
+                    <input type="hidden" name="battery_id"
+                           value="<?= htmlspecialchars($scrapInfo['BatteryID']) ?>">
+
+                    <label class="label-block">Reason for Scrap (required, max 255 chars)</label>
+                    <textarea name="reason" maxlength="255"
+                              placeholder="Describe why this battery is being scrapped."><?= isset($_POST['reason']) ? htmlspecialchars($_POST['reason']) : '' ?></textarea>
+
+                    <button type="submit" name="confirm_scrap" class="btn mt-10">
+                        Scrap This Battery
+                    </button>
+                </form>
+
+                <p class="mt-6 small-note">
+                    Reason text will be cleaned (for example, single quotes removed) before being stored in the audit log.
+                </p>
             </div>
         <?php endif; ?>
 
