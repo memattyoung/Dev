@@ -179,7 +179,7 @@ try {
 }
 
 // ===== ROUTING / STATE =====
-// views: menu | inventory | sell | transfer | scrap
+// views: menu | inventory | sell | transfer | scrap | stocktruck
 $view = $_GET['view'] ?? 'menu';
 $msg  = $_GET['msg']  ?? '';
 
@@ -835,6 +835,7 @@ if ($view === 'menu') {
         <div class="menu-grid">
             <a class="btn" href="?view=inventory">Inventory</a>
             <a class="btn" href="?view=sell">Sell Battery</a>
+            <a class="btn" href="?view=stocktruck">Stock Truck</a>
             <a class="btn" href="?view=transfer">Transfer Battery</a>
             <a class="btn" href="?view=scrap">Scrap Battery</a>
         </div>
@@ -1111,6 +1112,20 @@ if ($view === 'menu') {
                 </p>
             </div>
         <?php endif; ?>
+
+    <?php elseif ($view === 'stocktruck'): ?>
+
+        <h2>Stock Truck</h2>
+
+        <div class="card">
+            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+        </div>
+
+        <div class="card">
+            <p class="text-center" style="font-size:14px;">
+                Stock Truck functionality coming soon.
+            </p>
+        </div>
 
     <?php else: ?>
 
