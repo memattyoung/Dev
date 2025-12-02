@@ -54,7 +54,6 @@ try {
 }
 
 // Example query – change this to your real table/query
-// e.g. SELECT * FROM battery ORDER BY date_code DESC LIMIT 100
 $sql = "SELECT * From Inventory";
 $stmt = $pdo->query($sql);
 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -80,14 +79,14 @@ $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <table>
             <tr>
                 <th>Battery</th>
-                <th>Battery ID</th>
-                <th>Date Code</th>
+                <th>Location</th>
+                <th>LastUpdate</th>
             </tr>
             <?php foreach ($rows as $r): ?>
                 <tr>
-                    <td><?= htmlspecialchars($r['battery'] ?? '') ?></td>
-                    <td><?= htmlspecialchars($r['batteryid'] ?? '') ?></td>
-                    <td><?= htmlspecialchars($r['date_code'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['Battery'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['Location'] ?? '') ?></td>
+                    <td><?= htmlspecialchars($r['LastUpdate'] ?? '') ?></td>
                 </tr>
             <?php endforeach; ?>
         </table>
