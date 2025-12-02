@@ -316,7 +316,7 @@ if ($view === 'transfer') {
                     $fromLoc = $row['Location'];
 
                     if ($fromLoc === $transferTo) {
-                        $transferError = "From Location and To Location cannot be the same.";
+                        $transferError = "BatteryID already at location.";
                     } else {
                         $transferPreview = [
                             'BatteryID' => $row['BatteryID'],
@@ -341,7 +341,7 @@ if ($view === 'transfer') {
             if ($bid === '' || $fromLoc === '' || $toLoc === '') {
                 $transferError = "Missing transfer data. Please try again.";
             } elseif ($fromLoc === $toLoc) {
-                $transferError = "From Location and To Location cannot be the same.";
+                $transferError = "BatteryID already at location.";
             } else {
                 try {
                     $pdo->beginTransaction();
@@ -719,8 +719,7 @@ if ($view === 'transfer') {
             </form>
 
             <p class="mt-6" style="font-size:12px; color:#6b7280;">
-                Only batteries not <strong>SOLD</strong> or <strong>SCRAPPED</strong> can be transferred.<br>
-                From Location and To Location must be different.
+                Only batteries not <strong>SOLD</strong> or <strong>SCRAPPED</strong> can be transferred.
             </p>
         </div>
 
