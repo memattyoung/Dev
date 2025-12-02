@@ -19,36 +19,84 @@ try {
     die("DB connection failed: " . htmlspecialchars($e->getMessage()));
 }
 
-// ===== LOGIN GATE USING EMPLOYEE TABLE (NO OUTPUT BEFORE THIS POINT) =====
+// ===== LOGIN GATE USING AAA + PASSWORD =====
 if (!isset($_SESSION['logged_in'])) {
     $error = "";
+    $step = $_POST['step'] ?? 'aaa';   // step: aaa → password
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $inputPassword = trim($_POST['password'] ?? '');
 
-        // Lookup employee by password
-        $stmt = $pdo->prepare("
-            SELECT AAA, FirstName, LastName
-            FROM Employee
-            WHERE Password = :pwd
-            LIMIT 1
-        ");
-        $stmt->execute([':pwd' => $inputPassword]);
-        $emp = $stmt->fetch(PDO::FETCH_ASSOC);
+        // ---- STEP 1: USER ENTERS AAA ----
+        if ($step === 'aaa') {
+            $aaa = trim($_POST['aaa'] ?? '');
 
-        if ($emp) {
-            // Save employee identity to session
-            $_SESSION['logged_in']  = true;
-            $_SESSION['AAA']        = $emp['AAA'];
-            $_SESSION['FirstName']  = $emp['FirstName'];
-            $_SESSION['LastName']   = $emp['LastName'];
+            if ($aaa === '') {
+                $error = "Please enter your AAA number.";
+            } else {
+                // Validate AAA exists
+                $stmt = $pdo->prepare("
+                    SELECT AAA, FirstName, LastName
+                    FROM Employee
+                    WHERE AAA = :aaa
+                    LIMIT 1
+                ");
+                $stmt->execute([':aaa' => $aaa]);
+                $emp = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            header("Location: " . $_SERVER['PHP_SELF']);
-            exit;
-        } else {
-            $error = "Invalid password";
+                if ($emp) {
+                    // Store AAA temporarily for next step
+                    $_SESSION['pending_AAA']       = $emp['AAA'];
+                    $_SESSION['pending_FirstName'] = $emp['FirstName'];
+                    $_SESSION['pending_LastName']  = $emp['LastName'];
+                    $step = 'password'; // move to password step
+                } else {
+                    $error = "AAA number not found.";
+                }
+            }
+        }
+
+        // ---- STEP 2: USER ENTERS PASSWORD ----
+        elseif ($step === 'password') {
+            $pwd = trim($_POST['password'] ?? '');
+
+            if ($pwd === '') {
+                $error = "Please enter your password.";
+                $step = 'password';
+            } else {
+                $aaa = $_SESSION['pending_AAA'] ?? '';
+
+                $stmt = $pdo->prepare("
+                    SELECT AAA, FirstName, LastName 
+                    FROM Employee
+                    WHERE AAA = :aaa AND Password = :pwd
+                    LIMIT 1
+                ");
+                $stmt->execute([
+                    ':aaa' => $aaa,
+                    ':pwd' => $pwd
+                ]);
+                $emp = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($emp) {
+                    // Successful login — finalize identity
+                    $_SESSION['logged_in'] = true;
+                    $_SESSION['AAA']       = $emp['AAA'];
+                    $_SESSION['FirstName'] = $emp['FirstName'];
+                    $_SESSION['LastName']  = $emp['LastName'];
+
+                    // Clear temporary session values
+                    unset($_SESSION['pending_AAA'], $_SESSION['pending_FirstName'], $_SESSION['pending_LastName']);
+
+                    header("Location: " . $_SERVER['PHP_SELF']);
+                    exit;
+                } else {
+                    $error = "Incorrect password.";
+                    $step = 'password';
+                }
+            }
         }
     }
+
     ?>
     <!doctype html>
     <html>
@@ -57,16 +105,43 @@ if (!isset($_SESSION['logged_in'])) {
         <title>Browns Towing Battery Program Login</title>
     </head>
     <body style="font-family:sans-serif; max-width:400px; margin:40px auto;">
-        <h2>Browns Towing Battery Program Login</h2>
+
+        <h2 style="text-align:center;">Browns Towing Battery Program Login</h2>
+
         <?php if (!empty($error)): ?>
             <p style='color:red;'><?= htmlspecialchars($error) ?></p>
         <?php endif; ?>
-        <form method="post">
-            <label>Password:</label><br>
-            <input type="password" name="password"
-                   style="width:100%; padding:8px; margin:8px 0;">
-            <button type="submit" style="width:100%; padding:10px;">Enter</button>
-        </form>
+
+        <!-- STEP 1: ENTER AAA -->
+        <?php if ($step === 'aaa'): ?>
+            <form method="post">
+                <input type="hidden" name="step" value="aaa">
+
+                <label>AAA Number:</label><br>
+                <input type="text" name="aaa"
+                       style="width:100%; padding:8px; margin:8px 0;"
+                       placeholder="Enter your AAA">
+
+                <button type="submit" style="width:100%; padding:10px;">Next</button>
+            </form>
+        <?php endif; ?>
+
+        <!-- STEP 2: ENTER PASSWORD -->
+        <?php if ($step === 'password'): ?>
+            <p>Hello, <?= htmlspecialchars($_SESSION['pending_FirstName'] ?? '') ?> — please enter your password.</p>
+
+            <form method="post">
+                <input type="hidden" name="step" value="password">
+
+                <label>Password:</label><br>
+                <input type="password" name="password"
+                       style="width:100%; padding:8px; margin:8px 0;"
+                       placeholder="Enter password">
+
+                <button type="submit" style="width:100%; padding:10px;">Login</button>
+            </form>
+        <?php endif; ?>
+
     </body>
     </html>
     <?php
