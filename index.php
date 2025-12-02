@@ -73,16 +73,23 @@ try {
 // =======================================================
 //  SECTION 4: ROUTING / STATE
 // =======================================================
-// view: menu | inventory | sell | add | remove
+// view: menu | inventory | sell | transfer
 $view = $_GET['view'] ?? 'menu';
 $msg  = $_GET['msg']  ?? '';
 
 // Pre-declare section vars
-$invRows       = [];
-$allLocations  = [];
-$allBatteries  = [];
-$sellError     = "";
-$sellInfo      = null;
+$invRows          = [];
+$allLocations     = [];
+$allBatteries     = [];
+$sellError        = "";
+$sellInfo         = null;
+
+$transferError    = "";
+$transferPreview  = null;
+$transferMode     = 'truck';   // 'truck' or 'shop'
+$transferToLoc    = '';
+$truckList        = [];
+$shopLocations    = [];
 
 
 // =======================================================
@@ -95,14 +102,14 @@ if ($view === 'inventory') {
     $selectedBattery  = isset($_GET['bat']) ? trim($_GET['bat']) : '';
 
     // 5.1 Get all unique Batteries & Locations for dropdowns
-    //     Excludes SOLD locations.
+    //     Excludes SOLD from Inventory.
     $sqlAll = "
         SELECT 
             Battery.Battery AS Battery,
             Inventory.Location AS Location
         FROM Battery
         JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
-        WHERE Inventory.Location <> 'SOLD'
+        WHERE Inventory.Location <> 'SOLD' AND Inventory.Location <> 'SCRAPPED'
         GROUP BY Battery.Battery, Inventory.Location
         ORDER BY Battery.Battery, Inventory.Location
     ";
@@ -127,7 +134,7 @@ if ($view === 'inventory') {
             Inventory.Location AS Location
         FROM Battery
         JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
-        WHERE Inventory.Location <> 'SOLD'
+        WHERE Inventory.Location <> 'SOLD' AND Inventory.Location <> 'SCRAPPED'
     ";
     $params = [];
 
@@ -156,7 +163,6 @@ if ($view === 'inventory') {
 //  (Already excludes SOLD in all lookups/updates)
 // =======================================================
 if ($view === 'sell') {
-    // Handle both lookup and final sell before HTML
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // 6.1 Step 1: Lookup by BatteryID
@@ -176,14 +182,14 @@ if ($view === 'sell') {
                     JOIN Inventory 
                       ON Battery.BatteryID = Inventory.BatteryID
                     WHERE Battery.BatteryID = :bid
-                      AND Inventory.Location <> 'SOLD'
+                      AND Inventory.Location <> 'SOLD' AND Inventory.Location <> 'SCRAPPED'
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $inputId]);
                 $sellInfo = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if (!$sellInfo) {
-                    $sellError = "Battery not found, or it is already SOLD.";
+                    $sellError = "Battery not found, or it is already SOLD/SCRAPPED.";
                 }
             }
         }
@@ -206,7 +212,7 @@ if ($view === 'sell') {
                     JOIN Inventory 
                       ON Battery.BatteryID = Inventory.BatteryID
                     WHERE Battery.BatteryID = :bid
-                      AND Inventory.Location <> 'SOLD'
+                      AND Inventory.Location <> 'SOLD' AND Inventory.Location <> 'SCRAPPED'
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $bid]);
@@ -220,16 +226,16 @@ if ($view === 'sell') {
 
                         $fromLoc = $row['Location'];
 
-                        // 6.2.1 Update Inventory: mark SOLD
+                        // Update Inventory: mark SOLD
                         $update = $pdo->prepare("
                             UPDATE Inventory 
                             SET Location = 'SOLD' 
                             WHERE BatteryID = :bid
-                              AND Location <> 'SOLD'
+                              AND Location <> 'SOLD' 
                         ");
                         $update->execute([':bid' => $bid]);
 
-                        // 6.2.2 Insert AuditLog record
+                        // Insert AuditLog record
                         $insert = $pdo->prepare("
                             INSERT INTO AuditLog
                                 (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer)
@@ -245,13 +251,175 @@ if ($view === 'sell') {
 
                         $pdo->commit();
 
-                        // 6.2.3 Redirect back to menu with success message
                         header("Location: " . $_SERVER['PHP_SELF'] . "?view=menu&msg=sold");
                         exit;
 
                     } catch (Exception $e) {
                         $pdo->rollBack();
                         $sellError = "Error selling battery: " . $e->getMessage();
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+// =======================================================
+//  SECTION 7: TRANSFER BATTERY LOGIC (IF VIEW = transfer)
+// =======================================================
+if ($view === 'transfer') {
+
+    // 7.1 Load dropdown data: trucks and shop locations
+    // Trucks
+    $stmtTrucks = $pdo->query("
+        SELECT DISTINCT Truck AS Truck
+        FROM Trucks
+        ORDER BY Truck
+    ");
+    $truckList = $stmtTrucks->fetchAll(PDO::FETCH_COLUMN);
+
+    // Shop locations
+    $stmtLocs = $pdo->query("
+        SELECT DISTINCT Location AS Location
+        FROM Location
+        ORDER BY Location
+    ");
+    $shopLocations = $stmtLocs->fetchAll(PDO::FETCH_COLUMN);
+
+    // Defaults for mode and to-location
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $transferMode  = $_POST['mode']   ?? 'truck';
+        $transferToLoc = trim($_POST['to_loc'] ?? '');
+    } else {
+        $transferMode  = 'truck';
+        $transferToLoc = '';
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+        // 7.2 Step 1: Preview transfer (lookup + build summary)
+        if (isset($_POST['preview_transfer'])) {
+            $inputId = trim($_POST['battery_id'] ?? '');
+
+            if ($inputId === '') {
+                $transferError = "Please enter a BatteryID.";
+            } elseif ($transferToLoc === '') {
+                $transferError = "Please select a destination.";
+            } else {
+                // Lookup battery, excluding SOLD and SCRAPPED
+                $sql = "
+                    SELECT 
+                        Battery.BatteryID,
+                        Battery.Battery,
+                        Battery.DateCode,
+                        Inventory.Location
+                    FROM Battery
+                    JOIN Inventory 
+                      ON Battery.BatteryID = Inventory.BatteryID
+                    WHERE Battery.BatteryID = :bid
+                      AND Inventory.Location <> 'SOLD'
+                      AND Inventory.Location <> 'SCRAPPED'
+                ";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([':bid' => $inputId]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if (!$row) {
+                    $transferError = "Battery not found, or it is SOLD/SCRAPPED.";
+                } else {
+                    $fromLoc = $row['Location'];
+
+                    if ($fromLoc === $transferToLoc) {
+                        $transferError = "From Location and To Location cannot be the same.";
+                    } else {
+                        // Build preview object
+                        $transferPreview = [
+                            'BatteryID' => $row['BatteryID'],
+                            'Battery'   => $row['Battery'],
+                            'DateCode'  => $row['DateCode'],
+                            'FromLoc'   => $fromLoc,
+                            'ToLoc'     => $transferToLoc,
+                            'Mode'      => $transferMode,
+                        ];
+                    }
+                }
+            }
+        }
+
+        // 7.3 Step 2: Confirm transfer
+        elseif (isset($_POST['confirm_transfer'])) {
+            $bid       = trim($_POST['battery_id'] ?? '');
+            $fromLoc   = trim($_POST['from_loc'] ?? '');
+            $toLoc     = trim($_POST['to_loc'] ?? '');
+            $battery   = trim($_POST['battery'] ?? '');
+            $dateCode  = trim($_POST['date_code'] ?? '');
+
+            if ($bid === '' || $toLoc === '' || $fromLoc === '') {
+                $transferError = "Missing transfer details.";
+            } elseif ($fromLoc === $toLoc) {
+                $transferError = "From Location and To Location cannot be the same.";
+            } else {
+                // Re-validate battery still valid (not SOLD/SCRAPPED)
+                $sql = "
+                    SELECT 
+                        Battery.BatteryID,
+                        Battery.Battery,
+                        Battery.DateCode,
+                        Inventory.Location
+                    FROM Battery
+                    JOIN Inventory 
+                      ON Battery.BatteryID = Inventory.BatteryID
+                    WHERE Battery.BatteryID = :bid
+                      AND Inventory.Location <> 'SOLD'
+                      AND Inventory.Location <> 'SCRAPPED'
+                ";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([':bid' => $bid]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if (!$row) {
+                    $transferError = "Battery not found, or it became SOLD/SCRAPPED.";
+                } else {
+                    try {
+                        $pdo->beginTransaction();
+
+                        // 7.3.1 Update Inventory: move to new location
+                        $update = $pdo->prepare("
+                            UPDATE Inventory
+                            SET Location = :toLoc
+                            WHERE BatteryID = :bid
+                              AND Location <> 'SOLD'
+                              AND Location <> 'SCRAPPED'
+                        ");
+                        $update->execute([
+                            ':toLoc' => $toLoc,
+                            ':bid'   => $bid,
+                        ]);
+
+                        // 7.3.2 Insert AuditLog record
+                        $insert = $pdo->prepare("
+                            INSERT INTO AuditLog
+                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer)
+                            VALUES
+                                ('WEBUSER', 'Tuna Marie', :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', :fromLoc, 'MOBILE')
+                        ");
+                        $insert->execute([
+                            ':fromLoc'   => $fromLoc,
+                            ':toLoc'     => $toLoc,
+                            ':batteryId' => $bid,
+                            ':battery'   => $battery,
+                            ':dateCode'  => $dateCode,
+                        ]);
+
+                        $pdo->commit();
+
+                        header("Location: " . $_SERVER['PHP_SELF'] . "?view=menu&msg=transferred");
+                        exit;
+
+                    } catch (Exception $e) {
+                        $pdo->rollBack();
+                        $transferError = "Error transferring battery: " . $e->getMessage();
                     }
                 }
             }
@@ -268,7 +436,7 @@ if ($view === 'sell') {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         /* ===================================================
-           SECTION 7: STYLES
+           SECTION 8: STYLES
            =================================================== */
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -291,7 +459,7 @@ if ($view === 'sell') {
         }
         @media (min-width: 600px) {
             .menu-grid {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: repeat(3, 1fr);
             }
         }
         .btn {
@@ -387,13 +555,19 @@ if ($view === 'sell') {
         }
         .mt-10 { margin-top: 10px; }
         .mt-6 { margin-top: 6px; }
+        .radio-row {
+            display: flex;
+            gap: 12px;
+            margin-top: 6px;
+            align-items: center;
+        }
     </style>
 </head>
 <body>
 <div class="container">
 
     <!-- ===================================================
-         SECTION 8: HEADER + GLOBAL MESSAGE
+         SECTION 9: HEADER + GLOBAL MESSAGES
          =================================================== -->
     <h1>Browns Towing Battery Program</h1>
 
@@ -403,9 +577,15 @@ if ($view === 'sell') {
         </div>
     <?php endif; ?>
 
+    <?php if ($msg === 'transferred'): ?>
+        <div class="msg msg-success">
+            Battery was successfully transferred and logged.
+        </div>
+    <?php endif; ?>
+
 
     <!-- ===================================================
-         SECTION 9: MAIN MENU VIEW
+         SECTION 10: MAIN MENU VIEW
          =================================================== -->
     <?php if ($view === 'menu'): ?>
 
@@ -413,20 +593,18 @@ if ($view === 'sell') {
         <div class="menu-grid">
             <a class="btn" href="?view=inventory">Inventory</a>
             <a class="btn" href="?view=sell">Sell Battery</a>
-            <a class="btn btn-secondary" href="?view=add">Add Battery</a>
-            <a class="btn btn-secondary" href="?view=remove">Remove Battery</a>
+            <a class="btn" href="?view=transfer">Transfer Battery</a>
         </div>
 
         <div class="card">
             <p class="text-center" style="font-size:13px; color:#6b7280;">
-                Use the buttons above to manage batteries.<br>
-                (Add/Remove Battery screens will be built later.)
+                Use the buttons above to manage batteries.
             </p>
         </div>
 
 
     <!-- ===================================================
-         SECTION 10: INVENTORY VIEW
+         SECTION 11: INVENTORY VIEW
          =================================================== -->
     <?php elseif ($view === 'inventory'): ?>
 
@@ -498,7 +676,7 @@ if ($view === 'sell') {
 
 
     <!-- ===================================================
-         SECTION 11: SELL BATTERY VIEW
+         SECTION 12: SELL BATTERY VIEW
          =================================================== -->
     <?php elseif ($view === 'sell'): ?>
 
@@ -527,7 +705,7 @@ if ($view === 'sell') {
                 </button>
             </form>
             <p class="mt-6" style="font-size:12px; color:#6b7280;">
-                Only batteries not previously <strong>SOLD</strong> are eligible.
+                Only batteries not previously <strong>SOLD</strong> or <strong>SCRAPPED</strong>are eligible.
             </p>
         </div>
 
@@ -552,20 +730,109 @@ if ($view === 'sell') {
 
 
     <!-- ===================================================
-         SECTION 12: PLACEHOLDER FOR FUTURE VIEWS
+         SECTION 13: TRANSFER BATTERY VIEW
          =================================================== -->
-    <?php else: ?>
+    <?php elseif ($view === 'transfer'): ?>
 
-        <h2>Coming Soon</h2>
+        <h2>Transfer a Battery</h2>
+
         <div class="card">
-            <p class="text-center">
-                This section is not built yet.<br>
-                Use the menu to go back.
-            </p>
-            <div class="mt-10 text-center">
-                <a class="btn" href="?view=menu">Back to Menu</a>
-            </div>
+            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
         </div>
+
+        <?php if (!empty($transferError)): ?>
+            <div class="card msg msg-error">
+                <?= htmlspecialchars($transferError) ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- Step 1: Input + Toggle + Destination -->
+        <div class="card">
+            <form method="post">
+                <label class="label-block">BatteryID</label>
+                <input type="text" name="battery_id"
+                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                       placeholder="Enter BatteryID">
+
+                <label class="label-block mt-10">Transfer Type</label>
+                <div class="radio-row">
+                    <label>
+                        <input type="radio" name="mode" value="truck"
+                            <?= ($transferMode === 'truck') ? 'checked' : '' ?>>
+                        Truck
+                    </label>
+                    <label>
+                        <input type="radio" name="mode" value="shop"
+                            <?= ($transferMode === 'shop') ? 'checked' : '' ?>>
+                        Shop
+                    </label>
+                </div>
+
+                <label class="label-block mt-10">Transfer To</label>
+                <?php if ($transferMode === 'shop'): ?>
+                    <!-- Shop locations dropdown -->
+                    <select name="to_loc">
+                        <option value="">Select Location</option>
+                        <?php foreach ($shopLocations as $loc): ?>
+                            <option value="<?= htmlspecialchars($loc) ?>"
+                                <?= ($loc === $transferToLoc) ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($loc) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                <?php else: ?>
+                    <!-- Truck dropdown -->
+                    <select name="to_loc">
+                        <option value="">Select Truck</option>
+                        <?php foreach ($truckList as $truck): ?>
+                            <option value="<?= htmlspecialchars($truck) ?>"
+                                <?= ($truck === $transferToLoc) ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($truck) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                <?php endif; ?>
+
+                <button type="submit" name="preview_transfer" class="btn mt-10">
+                    Preview Transfer
+                </button>
+            </form>
+
+            <p class="mt-6" style="font-size:12px; color:#6b7280;">
+                Only batteries not <strong>SOLD</strong> or <strong>SCRAPPED</strong> can be transferred.<br>
+                From Location and To Location must be different.
+            </p>
+        </div>
+
+        <!-- Step 2: Preview summary + confirm -->
+        <?php if ($transferPreview): ?>
+            <div class="card">
+                <h3 style="margin-top:0;">Confirm Transfer</h3>
+                <p><strong>BatteryID:</strong> <?= htmlspecialchars($transferPreview['BatteryID']) ?></p>
+                <p><strong>Battery:</strong> <?= htmlspecialchars($transferPreview['Battery']) ?></p>
+                <p><strong>Date Code:</strong> <?= htmlspecialchars($transferPreview['DateCode']) ?></p>
+                <p><strong>From Location:</strong> <?= htmlspecialchars($transferPreview['FromLoc']) ?></p>
+                <p><strong>To Location:</strong> <?= htmlspecialchars($transferPreview['ToLoc']) ?></p>
+
+                <form method="post" class="mt-10">
+                    <input type="hidden" name="battery_id"
+                           value="<?= htmlspecialchars($transferPreview['BatteryID']) ?>">
+                    <input type="hidden" name="from_loc"
+                           value="<?= htmlspecialchars($transferPreview['FromLoc']) ?>">
+                    <input type="hidden" name="to_loc"
+                           value="<?= htmlspecialchars($transferPreview['ToLoc']) ?>">
+                    <input type="hidden" name="battery"
+                           value="<?= htmlspecialchars($transferPreview['Battery']) ?>">
+                    <input type="hidden" name="date_code"
+                           value="<?= htmlspecialchars($transferPreview['DateCode']) ?>">
+
+                    <button type="submit" name="confirm_transfer" class="btn">
+                        Confirm Transfer
+                    </button>
+                </form>
+            </div>
+        <?php endif; ?>
+
 
     <?php endif; ?>
 
