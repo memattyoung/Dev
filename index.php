@@ -1,4 +1,8 @@
 <?php
+// =======================================================
+//  SECTION 1: CONFIGURATION
+// =======================================================
+
 // ===== CONFIG =====
 $dbHost = "browns-test.cr4wimy2q8ur.us-east-2.rds.amazonaws.com";
 $dbName = "Browns";
@@ -11,7 +15,10 @@ $appPassword = "GoldFish";
 // Start session
 session_start();
 
-// ===== LOGIN GATE (NO OUTPUT BEFORE THIS POINT) =====
+
+// =======================================================
+//  SECTION 2: LOGIN GATE (NO OUTPUT BEFORE THIS POINT)
+// =======================================================
 if (!isset($_SESSION['logged_in'])) {
     $error = "";
 
@@ -48,7 +55,10 @@ if (!isset($_SESSION['logged_in'])) {
     exit;
 }
 
-// ===== CONNECT TO DB =====
+
+// =======================================================
+//  SECTION 3: DATABASE CONNECTION
+// =======================================================
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
 
 try {
@@ -59,34 +69,40 @@ try {
     die("DB connection failed: " . htmlspecialchars($e->getMessage()));
 }
 
-// ===== ROUTING / STATE =====
-$view = $_GET['view'] ?? 'menu';   // menu | inventory | sell | add | remove
+
+// =======================================================
+//  SECTION 4: ROUTING / STATE
+// =======================================================
+// view: menu | inventory | sell | add | remove
+$view = $_GET['view'] ?? 'menu';
 $msg  = $_GET['msg']  ?? '';
 
-/**
- * We’ll pre-declare section vars so they exist when we render HTML.
- * - Inventory section: $invRows, $allLocations, $allBatteries
- * - Sell section: $sellError, $sellInfo
- */
+// Pre-declare section vars
 $invRows       = [];
 $allLocations  = [];
 $allBatteries  = [];
 $sellError     = "";
 $sellInfo      = null;
 
-// ===== INVENTORY SECTION: BUILD DATA IF NEEDED =====
+
+// =======================================================
+//  SECTION 5: INVENTORY LOGIC (IF VIEW = inventory)
+//  (Note: SOLD rows are always excluded)
+// =======================================================
 if ($view === 'inventory') {
     // Filters from GET
     $selectedLocation = isset($_GET['loc']) ? trim($_GET['loc']) : '';
     $selectedBattery  = isset($_GET['bat']) ? trim($_GET['bat']) : '';
 
-    // 1) Get all unique Batteries & Locations for dropdowns
+    // 5.1 Get all unique Batteries & Locations for dropdowns
+    //     Excludes SOLD locations.
     $sqlAll = "
         SELECT 
             Battery.Battery AS Battery,
             Inventory.Location AS Location
         FROM Battery
         JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
+        WHERE Inventory.Location <> 'SOLD'
         GROUP BY Battery.Battery, Inventory.Location
         ORDER BY Battery.Battery, Inventory.Location
     ";
@@ -102,7 +118,8 @@ if ($view === 'inventory') {
         }
     }
 
-    // 2) Main aggregated query with filters
+    // 5.2 Main aggregated query with filters
+    //     Base WHERE excludes SOLD globally.
     $sql = "
         SELECT 
             Battery.Battery AS Battery,
@@ -110,7 +127,7 @@ if ($view === 'inventory') {
             Inventory.Location AS Location
         FROM Battery
         JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
-        WHERE 1=1
+        WHERE Inventory.Location <> 'SOLD'
     ";
     $params = [];
 
@@ -133,12 +150,16 @@ if ($view === 'inventory') {
     $invRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// ===== SELL BATTERY SECTION: HANDLE POST / LOOKUP / SELL =====
+
+// =======================================================
+//  SECTION 6: SELL BATTERY LOGIC (IF VIEW = sell)
+//  (Already excludes SOLD in all lookups/updates)
+// =======================================================
 if ($view === 'sell') {
-    // We’ll handle both the lookup and the final sell here before HTML.
+    // Handle both lookup and final sell before HTML
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-        // Step 1: Lookup by BatteryID
+        // 6.1 Step 1: Lookup by BatteryID
         if (isset($_POST['lookup_battery'])) {
             $inputId = trim($_POST['battery_id'] ?? '');
 
@@ -167,7 +188,7 @@ if ($view === 'sell') {
             }
         }
 
-        // Step 2: Confirm sale
+        // 6.2 Step 2: Confirm sale
         elseif (isset($_POST['confirm_sell'])) {
             $bid = trim($_POST['battery_id'] ?? '');
 
@@ -199,7 +220,7 @@ if ($view === 'sell') {
 
                         $fromLoc = $row['Location'];
 
-                        // Update Inventory: mark SOLD
+                        // 6.2.1 Update Inventory: mark SOLD
                         $update = $pdo->prepare("
                             UPDATE Inventory 
                             SET Location = 'SOLD' 
@@ -208,7 +229,7 @@ if ($view === 'sell') {
                         ");
                         $update->execute([':bid' => $bid]);
 
-                        // Insert AuditLog record
+                        // 6.2.2 Insert AuditLog record
                         $insert = $pdo->prepare("
                             INSERT INTO AuditLog
                                 (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer)
@@ -224,7 +245,7 @@ if ($view === 'sell') {
 
                         $pdo->commit();
 
-                        // Redirect back to menu with success message
+                        // 6.2.3 Redirect back to menu with success message
                         header("Location: " . $_SERVER['PHP_SELF'] . "?view=menu&msg=sold");
                         exit;
 
@@ -246,6 +267,9 @@ if ($view === 'sell') {
     <title>Browns Towing Battery Program</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
+        /* ===================================================
+           SECTION 7: STYLES
+           =================================================== */
         body {
             font-family: system-ui, -apple-system, sans-serif;
             margin: 0;
@@ -368,6 +392,9 @@ if ($view === 'sell') {
 <body>
 <div class="container">
 
+    <!-- ===================================================
+         SECTION 8: HEADER + GLOBAL MESSAGE
+         =================================================== -->
     <h1>Browns Towing Battery Program</h1>
 
     <?php if ($msg === 'sold'): ?>
@@ -376,6 +403,10 @@ if ($view === 'sell') {
         </div>
     <?php endif; ?>
 
+
+    <!-- ===================================================
+         SECTION 9: MAIN MENU VIEW
+         =================================================== -->
     <?php if ($view === 'menu'): ?>
 
         <h2>Main Menu</h2>
@@ -393,6 +424,10 @@ if ($view === 'sell') {
             </p>
         </div>
 
+
+    <!-- ===================================================
+         SECTION 10: INVENTORY VIEW
+         =================================================== -->
     <?php elseif ($view === 'inventory'): ?>
 
         <h2>Inventory Summary</h2>
@@ -461,6 +496,10 @@ if ($view === 'sell') {
             </div>
         </div>
 
+
+    <!-- ===================================================
+         SECTION 11: SELL BATTERY VIEW
+         =================================================== -->
     <?php elseif ($view === 'sell'): ?>
 
         <h2>Sell a Battery</h2>
@@ -511,9 +550,12 @@ if ($view === 'sell') {
             </div>
         <?php endif; ?>
 
+
+    <!-- ===================================================
+         SECTION 12: PLACEHOLDER FOR FUTURE VIEWS
+         =================================================== -->
     <?php else: ?>
 
-        <!-- Placeholder for Add / Remove until we build them -->
         <h2>Coming Soon</h2>
         <div class="card">
             <p class="text-center">
