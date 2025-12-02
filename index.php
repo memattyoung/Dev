@@ -1,5 +1,5 @@
 <?php
-// === CONFIG: put your RDS info here ===
+// === CONFIG: RDS info ===
 $dbHost = "browns-test.cr4wimy2q8ur.us-east-2.rds.amazonaws.com";
 $dbName = "Browns";
 $dbUser = "memattyoung";
@@ -45,7 +45,6 @@ if (!isset($_SESSION['logged_in'])) {
 
 // Connect to DB
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
-
 try {
     $pdo = new PDO($dsn, $dbUser, $dbPass, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
@@ -54,43 +53,71 @@ try {
     die("DB connection failed: " . htmlspecialchars($e->getMessage()));
 }
 
-// Pull detailed rows, then we'll group in PHP
+// Read filters from GET
+$selectedBattery  = isset($_GET['battery'])  ? trim($_GET['battery'])  : '';
+$selectedLocation = isset($_GET['location']) ? trim($_GET['location']) : '';
+
+// --- Get dropdown options (all valid Batteries and Locations from the join) ---
+
+// Distinct Batteries
+$optBatterySql = "
+    SELECT DISTINCT Battery.Battery AS Battery
+    FROM Battery
+    JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
+    ORDER BY Battery.Battery
+";
+$optBatteryStmt = $pdo->query($optBatterySql);
+$batteryOptions = $optBatteryStmt->fetchAll(PDO::FETCH_COLUMN);
+
+// Distinct Locations
+$optLocationSql = "
+    SELECT DISTINCT Inventory.Location AS Location
+    FROM Battery
+    JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
+    ORDER BY Inventory.Location
+";
+$optLocationStmt = $pdo->query($optLocationSql);
+$locationOptions = $optLocationStmt->fetchAll(PDO::FETCH_COLUMN);
+
+// --- Main aggregated query (Battery, Quantity, Location) with optional filters ---
+
 $sql = "
     SELECT 
-        Battery.BatteryID,
-        Battery.Battery,
-        Battery.DateCode,
-        Inventory.Location,
-        Inventory.LastUpdate
+        Battery.Battery AS Battery,
+        COUNT(Battery.Battery) AS Quantity,
+        Inventory.Location AS Location
     FROM Battery
-    JOIN Inventory 
-        ON Battery.BatteryID = Inventory.BatteryID
-    ORDER BY Battery.Battery, Inventory.Location, Battery.DateCode
+    JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
+    WHERE 1 = 1
 ";
 
-$stmt = $pdo->query($sql);
-$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$params = [];
 
-// Group by BatteryID + Location
-$groups = [];
-foreach ($rows as $r) {
-    $key = ($r['BatteryID'] ?? '') . '|' . ($r['Location'] ?? '');
-    if (!isset($groups[$key])) {
-        $groups[$key] = [
-            'BatteryID' => $r['BatteryID'] ?? '',
-            'Battery'   => $r['Battery'] ?? '',
-            'Location'  => $r['Location'] ?? '',
-            'rows'      => []
-        ];
-    }
-    $groups[$key]['rows'][] = $r;
+// Apply filters if set
+if ($selectedBattery !== '') {
+    $sql .= " AND Battery.Battery = :battery";
+    $params[':battery'] = $selectedBattery;
 }
+
+if ($selectedLocation !== '') {
+    $sql .= " AND Inventory.Location = :location";
+    $params[':location'] = $selectedLocation;
+}
+
+$sql .= "
+    GROUP BY Battery.Battery, Inventory.Location
+    ORDER BY Battery.Battery, Inventory.Location
+";
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!doctype html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Battery Inventory Viewer</title>
+    <title>Battery Inventory Summary</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { 
@@ -101,10 +128,41 @@ foreach ($rows as $r) {
         }
         h2 { 
             text-align: center; 
-            margin: 10px 0 15px;
+            margin: 10px 0 10px;
+        }
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 10px auto 15px;
+            max-width: 600px;
+            align-items: center;
+            justify-content: center;
+        }
+        .filters label {
+            font-size: 13px;
+            display: block;
+            margin-bottom: 3px;
+        }
+        .filters select {
+            padding: 6px;
+            min-width: 140px;
+            font-size: 14px;
+        }
+        .filters button {
+            padding: 8px 14px;
+            font-size: 14px;
+            border: none;
+            background: #2563eb;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .filters button:hover {
+            background: #1d4ed8;
         }
         .table-container { 
-            max-height: 75vh; 
+            max-height: 70vh; 
             overflow-y: auto; 
             background: white;
             border-radius: 8px;
@@ -118,165 +176,97 @@ foreach ($rows as $r) {
         th, td { 
             border-bottom: 1px solid #e5e7eb; 
             padding: 8px; 
+            text-align: left;
         }
         th { 
             background: #f3f4f6; 
             position: sticky; 
             top: 0; 
             z-index: 2;
-            text-align: left;
         }
-        .group-row { 
-            background: #fff; 
-            cursor: pointer; 
-        }
-        .group-row:hover { 
-            background: #eef2ff; 
-        }
-        .group-main {
-            display: flex;
-            flex-direction: column;
-        }
-        .group-main span:first-child {
-            font-weight: 600;
-        }
-        .group-sub {
-            font-size: 12px;
-            color: #6b7280;
-        }
-        .count-pill {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 999px;
-            background: #e5e7eb;
-            font-size: 12px;
-        }
-        .detail-row { 
-            display: none; 
-            background: #f9fafb; 
-        }
-        .detail-inner-table {
-            width: 100%;
-            border-collapse: collapse;
+        .summary {
+            max-width: 600px;
+            margin: 0 auto 8px;
             font-size: 13px;
-        }
-        .detail-inner-table th,
-        .detail-inner-table td {
-            border-bottom: 1px solid #e5e7eb;
-            padding: 4px 6px;
-        }
-        .toggle-indicator {
-            font-size: 18px;
-            width: 20px;
-            text-align: center;
+            color: #6b7280;
+            text-align: right;
         }
         @media (max-width: 600px) {
             th, td { padding: 6px; font-size: 13px; }
+            .filters { flex-direction: column; align-items: stretch; }
+            .filters select, .filters button { width: 100%; }
+            .summary { text-align: left; padding: 0 4px; }
         }
     </style>
 </head>
 <body>
-    <h2>Battery Inventory</h2>
+    <h2>Battery Inventory Summary</h2>
+
+    <!-- Filters -->
+    <form method="get" class="filters">
+        <div>
+            <label for="battery">Battery</label>
+            <select name="battery" id="battery">
+                <option value="">All Batteries</option>
+                <?php foreach ($batteryOptions as $b): ?>
+                    <option value="<?= htmlspecialchars($b) ?>"
+                        <?= ($b === $selectedBattery) ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($b) ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+
+        <div>
+            <label for="location">Location</label>
+            <select name="location" id="location">
+                <option value="">All Locations</option>
+                <?php foreach ($locationOptions as $loc): ?>
+                    <option value="<?= htmlspecialchars($loc) ?>"
+                        <?= ($loc === $selectedLocation) ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($loc) ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+
+        <div>
+            <label>&nbsp;</label>
+            <button type="submit">Apply Filters</button>
+        </div>
+    </form>
+
+    <div class="summary">
+        <?= count($rows) ?> row(s) returned
+    </div>
 
     <div class="table-container">
         <table>
             <thead>
                 <tr>
-                    <th style="width:40px;"></th>
                     <th>Battery</th>
+                    <th>Quantity</th>
                     <th>Location</th>
-                    <th>Count</th>
                 </tr>
             </thead>
             <tbody>
-            <?php
-            $i = 0;
-            foreach ($groups as $key => $g):
-                $groupId = "group_" . $i;
-                $count = count($g['rows']);
-                // optional: latest update in this group
-                $latestUpdate = '';
-                foreach ($g['rows'] as $row) {
-                    if (!empty($row['LastUpdate']) && $row['LastUpdate'] > $latestUpdate) {
-                        $latestUpdate = $row['LastUpdate'];
-                    }
-                }
-            ?>
-                <!-- Summary row (clickable) -->
-                <tr class="group-row" data-group="<?= htmlspecialchars($groupId) ?>">
-                    <td class="toggle-indicator">▶</td>
-                    <td>
-                        <div class="group-main">
-                            <span><?= htmlspecialchars($g['Battery']) ?></span>
-                            <span class="group-sub">ID: <?= htmlspecialchars($g['BatteryID']) ?></span>
-                        </div>
-                    </td>
-                    <td><?= htmlspecialchars($g['Location']) ?></td>
-                    <td>
-                        <span class="count-pill">
-                            <?= $count ?> record<?= $count === 1 ? '' : 's' ?>
-                            <?php if ($latestUpdate !== ''): ?>
-                                &nbsp;· last <?= htmlspecialchars($latestUpdate) ?>
-                            <?php endif; ?>
-                        </span>
-                    </td>
-                </tr>
-
-                <!-- Detail row (hidden until clicked) -->
-                <tr class="detail-row" id="<?= htmlspecialchars($groupId) ?>">
-                    <td></td>
-                    <td colspan="3">
-                        <table class="detail-inner-table">
-                            <thead>
-                                <tr>
-                                    <th>Date Code</th>
-                                    <th>Last Update</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($g['rows'] as $row): ?>
-                                    <tr>
-                                        <td><?= htmlspecialchars($row['DateCode'] ?? '') ?></td>
-                                        <td><?= htmlspecialchars($row['LastUpdate'] ?? '') ?></td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </td>
-                </tr>
-            <?php
-                $i++;
-            endforeach;
-            if ($i === 0):
-            ?>
-                <tr>
-                    <td colspan="4" style="text-align:center; padding:20px; color:#6b7280;">
-                        No records found.
-                    </td>
-                </tr>
-            <?php endif; ?>
+                <?php if (count($rows) === 0): ?>
+                    <tr>
+                        <td colspan="3" style="text-align:center; padding:20px; color:#6b7280;">
+                            No records found.
+                        </td>
+                    </tr>
+                <?php else: ?>
+                    <?php foreach ($rows as $r): ?>
+                        <tr>
+                            <td><?= htmlspecialchars($r['Battery'] ?? '') ?></td>
+                            <td><?= htmlspecialchars($r['Quantity'] ?? '') ?></td>
+                            <td><?= htmlspecialchars($r['Location'] ?? '') ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </tbody>
         </table>
     </div>
-
-    <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        document.querySelectorAll('.group-row').forEach(function (row) {
-            row.addEventListener('click', function () {
-                const groupId = row.getAttribute('data-group');
-                const detailRow = document.getElementById(groupId);
-                const indicator = row.querySelector('.toggle-indicator');
-
-                if (!detailRow) return;
-
-                const isHidden = detailRow.style.display === '' || detailRow.style.display === 'none';
-                detailRow.style.display = isHidden ? 'table-row' : 'none';
-                if (indicator) {
-                    indicator.textContent = isHidden ? '▼' : '▶';
-                }
-            });
-        });
-    });
-    </script>
 </body>
 </html>
