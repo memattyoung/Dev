@@ -4,7 +4,8 @@ $dbHost = "browns-test.cr4wimy2q8ur.us-east-2.rds.amazonaws.com";
 $dbName = "Browns";
 $dbUser = "memattyoung";
 $dbPass = "Myoung0996!";
-// Simple "password" for managers to access page (not fancy, but easy)
+
+// Simple "password" for managers to access page
 $appPassword = "GoldFish";
 
 // --- Basic login gate ---
@@ -53,8 +54,8 @@ try {
     die("DB connection failed: " . htmlspecialchars($e->getMessage()));
 }
 
-// Example query – change this to your real table/query
-$sql = "SELECT * From Inventory";
+// Your query
+$sql = "SELECT * FROM Inventory";
 $stmt = $pdo->query($sql);
 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
@@ -64,17 +65,53 @@ $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <meta charset="utf-8">
     <title>AWS Data Viewer</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+
     <style>
-        body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 10px; }
-        h2 { text-align: center; }
-        table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        th, td { border: 1px solid #ddd; padding: 6px; }
-        th { background: #f3f4f6; position: sticky; top: 0; }
-        .table-container { max-height: 70vh; overflow-y: auto; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 10px;
+        }
+        h2 {
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        /* Mobile-friendly table container */
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            border: 1px solid #ccc;
+            max-height: 75vh;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 18px; /* readable on phone */
+            min-width: 600px; /* force horizontal scroll instead of squeezing */
+        }
+
+        th, td {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            white-space: nowrap; /* no wrapping */
+            text-align: left;
+        }
+
+        th {
+            background: #f3f4f6;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
     </style>
 </head>
 <body>
+
     <h2>Battery Table</h2>
+
     <div class="table-container">
         <table>
             <tr>
@@ -91,5 +128,6 @@ $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <?php endforeach; ?>
         </table>
     </div>
+
 </body>
 </html>
