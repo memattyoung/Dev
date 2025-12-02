@@ -1186,16 +1186,26 @@ if ($view === 'menu') {
         <p style="font-size:12px; color:#6b7280; margin-top:6px;">
             Align the barcode within the frame until it is detected.
         </p>
-        <button type="button" onclick="closeScanner()" style="
-            margin-top:10px;
-            padding:8px 12px;
-            border:none;
-            border-radius:6px;
-            background:#4b5563;
-            color:#fff;
-        ">
-            Cancel
-        </button>
+        <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
+            <button type="button" onclick="switchCamera()" style="
+                padding:8px 12px;
+                border:none;
+                border-radius:6px;
+                background:#2563eb;
+                color:#fff;
+            ">
+                Switch Camera
+            </button>
+            <button type="button" onclick="closeScanner()" style="
+                padding:8px 12px;
+                border:none;
+                border-radius:6px;
+                background:#4b5563;
+                color:#fff;
+            ">
+                Cancel
+            </button>
+        </div>
     </div>
 </div>
 
@@ -1204,6 +1214,8 @@ if ($view === 'menu') {
 <script>
     let selectedInputId = null;
     let codeReader = null;
+    let videoInputDevices = [];
+    let currentDeviceIndex = 0;
     let currentStream = null;
     let audioCtx = null;
 
@@ -1218,7 +1230,7 @@ if ($view === 'menu') {
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.type = 'sine';
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5-ish
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
 
             osc.connect(gain);
@@ -1231,33 +1243,31 @@ if ($view === 'menu') {
         }
     }
 
-    async function openScanner(inputId) {
-        selectedInputId = inputId;
-        const overlay = document.getElementById('scannerOverlay');
+    function stopCurrentStream() {
         const video = document.getElementById('scannerVideo');
-
-        overlay.style.display = 'flex';
-
-        if (!codeReader) {
-            codeReader = new ZXing.BrowserMultiFormatReader();
+        if (currentStream) {
+            currentStream.getTracks().forEach(t => t.stop());
+            currentStream = null;
         }
+        if (video) {
+            video.srcObject = null;
+        }
+    }
+
+    async function startDecodingWithCurrentDevice() {
+        if (!videoInputDevices.length) return;
+
+        const device = videoInputDevices[currentDeviceIndex];
+        const deviceId = device.deviceId;
+
+        stopCurrentStream();
 
         try {
-            const constraints = {
-                video: {
-                    facingMode: { ideal: 'environment' }
-                }
-            };
+            const video = document.getElementById('scannerVideo');
 
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
-            currentStream = stream;
-            video.srcObject = stream;
-            video.setAttribute('playsinline', true);
-            await video.play();
-
-            codeReader.decodeFromVideoDevice(null, 'scannerVideo', (result, err) => {
+            // ZXing will call getUserMedia under the hood
+            codeReader.decodeFromVideoDevice(deviceId, 'scannerVideo', (result, err) => {
                 if (result) {
-                    // Got a barcode
                     const input = document.getElementById(selectedInputId);
                     if (input) {
                         input.value = result.text;
@@ -1265,13 +1275,79 @@ if ($view === 'menu') {
                     playBeep();
                     closeScanner();
                 }
-                // err is often just NotFoundException while scanning; safe to ignore
+                // err is usually "NotFoundException" while scanning – safe to ignore
             });
+
+            // Save the stream from the video element once it starts
+            setTimeout(() => {
+                if (video && video.srcObject) {
+                    currentStream = video.srcObject;
+                }
+            }, 500);
+
+        } catch (e) {
+            console.error('Error starting decode:', e);
+            alert('Unable to start camera. Please check permissions.');
+            closeScanner();
+        }
+    }
+
+    function pickBackCameraIndex(devices) {
+        // Prefer labels that look like back/rear/environment
+        let idx = devices.findIndex(d =>
+            /back|rear|environment/i.test(d.label)
+        );
+        if (idx !== -1) return idx;
+
+        // Next, prefer anything that is NOT clearly front
+        idx = devices.findIndex(d =>
+            !/front|user/i.test(d.label)
+        );
+        if (idx !== -1) return idx;
+
+        // Fallback to first
+        return 0;
+    }
+
+    async function openScanner(inputId) {
+        selectedInputId = inputId;
+        const overlay = document.getElementById('scannerOverlay');
+        overlay.style.display = 'flex';
+
+        if (!codeReader) {
+            codeReader = new ZXing.BrowserMultiFormatReader();
+        }
+
+        try {
+            // Get list of cameras
+            videoInputDevices = await codeReader.listVideoInputDevices();
+            if (!videoInputDevices.length) {
+                alert('No camera found on this device.');
+                closeScanner();
+                return;
+            }
+
+            currentDeviceIndex = pickBackCameraIndex(videoInputDevices);
+            await startDecodingWithCurrentDevice();
         } catch (e) {
             console.error(e);
             alert('Unable to access camera. Please check permissions.');
             closeScanner();
         }
+    }
+
+    function switchCamera() {
+        if (!videoInputDevices.length || !codeReader) return;
+
+        try {
+            codeReader.reset();
+        } catch (e) {
+            console.warn(e);
+        }
+        stopCurrentStream();
+
+        currentDeviceIndex = (currentDeviceIndex + 1) % videoInputDevices.length;
+        startDecodingWithCurrentDevice();
     }
 
     function closeScanner() {
@@ -1285,12 +1361,7 @@ if ($view === 'menu') {
                 console.warn(e);
             }
         }
-
-        // Stop camera stream
-        if (currentStream) {
-            currentStream.getTracks().forEach(t => t.stop());
-            currentStream = null;
-        }
+        stopCurrentStream();
     }
 </script>
 </body>
