@@ -368,7 +368,7 @@ if ($view === 'sell') {
 <body>
 <div class="container">
 
-    <h1>Current Browns Portal</h1>
+    <h1>Browns Towing Battery Program</h1>
 
     <?php if ($msg === 'sold'): ?>
         <div class="msg msg-success">
