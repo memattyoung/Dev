@@ -5,7 +5,7 @@ $dbName = "Browns";
 $dbUser = "memattyoung";
 $dbPass = "Myoung0996!";
 
-// Force PHP timezone to Eastern
+// Force PHP timezone to Eastern (handles EST/EDT automatically)
 date_default_timezone_set('America/New_York');
 
 // Start session
@@ -75,8 +75,6 @@ if (!isset($_SESSION['logged_in'])) {
                 $pdoLogin = new PDO($dsnLogin, $dbUser, $dbPass, [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
                 ]);
-                // Force MySQL connection time zone to Eastern Standard Time
-                $pdoLogin->exec("SET time_zone = '-05:00'");
 
                 $sqlEmp = "
                     SELECT AAA, FirstName, LastName
@@ -94,25 +92,27 @@ if (!isset($_SESSION['logged_in'])) {
                 if ($emp) {
                     $empId   = $emp['AAA'];
                     $empName = $emp['FirstName'] . " " . $emp['LastName'];
+                    $now     = date('Y-m-d H:i:s'); // EST/EDT local time
 
                     // Insert AuditLog record for Log On
                     $insertLogin = $pdoLogin->prepare("
                         INSERT INTO AuditLog
                             (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate) 
                         VALUES
-                            (:empId, :empName, '', '', '', 'Log On', '', '', '', '', '', 'MOBILE', NOW())
+                            (:empId, :empName, '', '', '', 'Log On', '', '', '', '', '', 'MOBILE', :lastUpdate)
                     ");
                     $insertLogin->execute([
-                        ':empId'   => $empId,
-                        ':empName' => $empName,
+                        ':empId'      => $empId,
+                        ':empName'    => $empName,
+                        ':lastUpdate' => $now,
                     ]);
 
                     // Set session
-                    $_SESSION['logged_in']  = true;
-                    $_SESSION['empAAA']     = $empId;
-                    $_SESSION['empFirst']   = $emp['FirstName'];
-                    $_SESSION['empLast']    = $emp['LastName'];
-                    $_SESSION['empName']    = $empName;
+                    $_SESSION['logged_in']     = true;
+                    $_SESSION['empAAA']        = $empId;
+                    $_SESSION['empFirst']      = $emp['FirstName'];
+                    $_SESSION['empLast']       = $emp['LastName'];
+                    $_SESSION['empName']       = $empName;
                     $_SESSION['last_activity'] = time(); // start timeout timer
 
                     header("Location: " . $_SERVER['PHP_SELF']);
@@ -174,8 +174,6 @@ try {
     $pdo = new PDO($dsn, $dbUser, $dbPass, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
     ]);
-    // Force MySQL connection time zone to Eastern Standard Time
-    $pdo->exec("SET time_zone = '-05:00'");
 } catch (Exception $e) {
     die("DB connection failed: " . htmlspecialchars($e->getMessage()));
 }
@@ -325,6 +323,7 @@ if ($view === 'sell') {
                         $pdo->beginTransaction();
 
                         $fromLoc = $row['Location'];
+                        $now     = date('Y-m-d H:i:s');
 
                         // Update Inventory
                         $update = $pdo->prepare("
@@ -340,15 +339,16 @@ if ($view === 'sell') {
                             INSERT INTO AuditLog
                                 (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate)
                             VALUES
-                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', NOW())
+                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', :lastUpdate)
                         ");
                         $insert->execute([
-                            ':empId'    => $empAAA,
-                            ':empName'  => $empName,
-                            ':fromLoc'  => $fromLoc,
-                            ':batteryId'=> $row['BatteryID'],
-                            ':battery'  => $row['Battery'],
-                            ':dateCode' => $row['DateCode'],
+                            ':empId'      => $empAAA,
+                            ':empName'    => $empName,
+                            ':fromLoc'    => $fromLoc,
+                            ':batteryId'  => $row['BatteryID'],
+                            ':battery'    => $row['Battery'],
+                            ':dateCode'   => $row['DateCode'],
+                            ':lastUpdate' => $now,
                         ]);
 
                         $pdo->commit();
@@ -482,6 +482,8 @@ if ($view === 'transfer') {
                         $pdo->rollBack();
                         $transferError = "Battery location changed or is now SOLD/SCRAPPED. Refresh and try again.";
                     } else {
+                        $now = date('Y-m-d H:i:s');
+
                         // Update Inventory
                         $update = $pdo->prepare("
                             UPDATE Inventory
@@ -498,16 +500,17 @@ if ($view === 'transfer') {
                             INSERT INTO AuditLog
                                 (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate)
                             VALUES
-                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', NOW())
+                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', :lastUpdate)
                         ");
                         $insert->execute([
-                            ':empId'    => $empAAA,
-                            ':empName'  => $empName,
-                            ':fromLoc'  => $fromLoc,
-                            ':toLoc'    => $toLoc,
-                            ':batteryId'=> $bid,
-                            ':battery'  => $battery,
-                            ':dateCode' => $dateCode,
+                            ':empId'      => $empAAA,
+                            ':empName'    => $empName,
+                            ':fromLoc'    => $fromLoc,
+                            ':toLoc'      => $toLoc,
+                            ':batteryId'  => $bid,
+                            ':battery'    => $battery,
+                            ':dateCode'   => $dateCode,
+                            ':lastUpdate' => $now,
                         ]);
 
                         $pdo->commit();
@@ -600,6 +603,7 @@ if ($view === 'scrap') {
                             $pdo->beginTransaction();
 
                             $fromLoc = $row['Location'];
+                            $now     = date('Y-m-d H:i:s');
 
                             // Update Inventory to SCRAPPED
                             $update = $pdo->prepare("
@@ -615,16 +619,17 @@ if ($view === 'scrap') {
                                 INSERT INTO AuditLog
                                     (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate)
                                 VALUES
-                                    (:empId, :empName, :fromLoc, 'SCRAPPED', :batteryId, 'Scrap', '', :battery, :dateCode, :reason, :fromLoc, 'MOBILE', NOW())
+                                    (:empId, :empName, :fromLoc, 'SCRAPPED', :batteryId, 'Scrap', '', :battery, :dateCode, :reason, :fromLoc, 'MOBILE', :lastUpdate)
                             ");
                             $insert->execute([
-                                ':empId'    => $empAAA,
-                                ':empName'  => $empName,
-                                ':fromLoc'  => $fromLoc,
-                                ':batteryId'=> $row['BatteryID'],
-                                ':battery'  => $row['Battery'],
-                                ':dateCode' => $row['DateCode'],
-                                ':reason'   => $reasonClean,
+                                ':empId'      => $empAAA,
+                                ':empName'    => $empName,
+                                ':fromLoc'    => $fromLoc,
+                                ':batteryId'  => $row['BatteryID'],
+                                ':battery'    => $row['Battery'],
+                                ':dateCode'   => $row['DateCode'],
+                                ':reason'     => $reasonClean,
+                                ':lastUpdate' => $now,
                             ]);
 
                             $pdo->commit();
@@ -644,17 +649,26 @@ if ($view === 'scrap') {
     }
 }
 
-// ===== SOLD TODAY COUNT (MENU ONLY) =====
+// ===== SOLD TODAY COUNT (MENU ONLY, BASED ON EST/EDT) =====
 if ($view === 'menu') {
     try {
+        // Local "today" in EST/EDT
+        $startToday = date('Y-m-d 00:00:00');
+        $endToday   = date('Y-m-d 23:59:59');
+
         $stmtSold = $pdo->prepare("
             SELECT COUNT(*) AS cnt
             FROM AuditLog
             WHERE EmployeeID = :empId
               AND ToLoc = 'SOLD'
-              AND DATE(LastUpdate) = CURRENT_DATE
+              AND LastUpdate >= :startToday
+              AND LastUpdate <= :endToday
         ");
-        $stmtSold->execute([':empId' => $empAAA]);
+        $stmtSold->execute([
+            ':empId'      => $empAAA,
+            ':startToday' => $startToday,
+            ':endToday'   => $endToday,
+        ]);
         $soldTodayCount = (int)$stmtSold->fetchColumn();
     } catch (Exception $e) {
         $soldTodayCount = 0; // fail quietly
@@ -904,214 +918,3 @@ if ($view === 'menu') {
                         <?php foreach ($invRows as $r): ?>
                             <tr>
                                 <td><?= htmlspecialchars($r['Battery'] ?? '') ?></td>
-                                <td><?= htmlspecialchars($r['Quantity'] ?? '') ?></td>
-                                <td><?= htmlspecialchars($r['Location'] ?? '') ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </table>
-            </div>
-        </div>
-
-    <?php elseif ($view === 'sell'): ?>
-
-        <h2>Sell a Battery</h2>
-
-        <div class="card">
-            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
-        </div>
-
-        <?php if (!empty($sellError)): ?>
-            <div class="card msg msg-error">
-                <?= htmlspecialchars($sellError) ?>
-            </div>
-        <?php endif; ?>
-
-        <!-- Step 1: Lookup -->
-        <div class="card">
-            <form method="post">
-                <label class="label-block">BatteryID</label>
-                <input type="text" name="battery_id"
-                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
-                       placeholder="Enter BatteryID">
-
-                <button type="submit" name="lookup_battery" class="btn mt-10">
-                    Lookup Battery
-                </button>
-            </form>
-            <p class="mt-6 small-note">
-                Only batteries not previously <strong>SOLD</strong> or <strong>SCRAPPED</strong> are eligible.
-            </p>
-        </div>
-
-        <!-- Step 2: Confirm Sale -->
-        <?php if ($sellInfo): ?>
-            <div class="card">
-                <h3 style="margin-top:0;">Confirm Sale</h3>
-                <p><strong>BatteryID:</strong> <?= htmlspecialchars($sellInfo['BatteryID']) ?></p>
-                <p><strong>Battery:</strong> <?= htmlspecialchars($sellInfo['Battery']) ?></p>
-                <p><strong>Date Code:</strong> <?= htmlspecialchars($sellInfo['DateCode']) ?></p>
-                <p><strong>Location:</strong> <?= htmlspecialchars($sellInfo['Location']) ?></p>
-
-                <form method="post" class="mt-10">
-                    <input type="hidden" name="battery_id"
-                           value="<?= htmlspecialchars($sellInfo['BatteryID']) ?>">
-                    <button type="submit" name="confirm_sell" class="btn">
-                        Sell This Battery
-                    </button>
-                </form>
-            </div>
-        <?php endif; ?>
-
-    <?php elseif ($view === 'transfer'): ?>
-
-        <h2>Transfer a Battery</h2>
-
-        <div class="card">
-            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
-        </div>
-
-        <?php if (!empty($transferError)): ?>
-            <div class="card msg msg-error">
-                <?= htmlspecialchars($transferError) ?>
-            </div>
-        <?php endif; ?>
-
-        <!-- Step 1: BatteryID + Destination -->
-        <div class="card">
-            <form method="post">
-                <label class="label-block">BatteryID</label>
-                <input type="text" name="battery_id"
-                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
-                       placeholder="Enter BatteryID">
-
-                <label class="label-block mt-10">Transfer To</label>
-                <select name="to_loc">
-                    <option value="">Select Destination</option>
-                    <?php foreach ($destRows as $d): ?>
-                        <?php
-                        $label = $d['ToLoc'] . ' (' . $d['Type'] . ')';
-                        $val   = $d['ToLoc'];
-                        ?>
-                        <option value="<?= htmlspecialchars($val) ?>"
-                            <?= ($val === ($transferToLoc ?? '')) ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($label) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-
-                <button type="submit" name="preview_transfer" class="btn mt-10">
-                    Preview Transfer
-                </button>
-            </form>
-
-            <p class="mt-6 small-note">
-                Only batteries not <strong>SOLD</strong> or <strong>SCRAPPED</strong> can be transferred.
-            </p>
-        </div>
-
-        <!-- Step 2: Preview + Confirm -->
-        <?php if ($transferPreview): ?>
-            <div class="card">
-                <h3 style="margin-top:0;">Confirm Transfer</h3>
-                <p><strong>BatteryID:</strong> <?= htmlspecialchars($transferPreview['BatteryID']) ?></p>
-                <p><strong>Battery:</strong> <?= htmlspecialchars($transferPreview['Battery']) ?></p>
-                <p><strong>Date Code:</strong> <?= htmlspecialchars($transferPreview['DateCode']) ?></p>
-                <p><strong>From Location:</strong> <?= htmlspecialchars($transferPreview['FromLoc']) ?></p>
-                <p><strong>To Location:</strong> <?= htmlspecialchars($transferPreview['ToLoc']) ?></p>
-
-                <form method="post" class="mt-10">
-                    <input type="hidden" name="battery_id"
-                           value="<?= htmlspecialchars($transferPreview['BatteryID']) ?>">
-                    <input type="hidden" name="from_loc"
-                           value="<?= htmlspecialchars($transferPreview['FromLoc']) ?>">
-                    <input type="hidden" name="to_loc"
-                           value="<?= htmlspecialchars($transferPreview['ToLoc']) ?>">
-                    <input type="hidden" name="battery"
-                           value="<?= htmlspecialchars($transferPreview['Battery']) ?>">
-                    <input type="hidden" name="date_code"
-                           value="<?= htmlspecialchars($transferPreview['DateCode']) ?>">
-
-                    <button type="submit" name="confirm_transfer" class="btn">
-                        Confirm Transfer
-                    </button>
-                </form>
-            </div>
-        <?php endif; ?>
-
-    <?php elseif ($view === 'scrap'): ?>
-
-        <h2>Scrap a Battery</h2>
-
-        <div class="card">
-            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
-        </div>
-
-        <?php if (!empty($scrapError)): ?>
-            <div class="card msg msg-error">
-                <?= htmlspecialchars($scrapError) ?>
-            </div>
-        <?php endif; ?>
-
-        <!-- Step 1: Lookup -->
-        <div class="card">
-            <form method="post">
-                <label class="label-block">BatteryID</label>
-                <input type="text" name="battery_id"
-                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
-                       placeholder="Enter BatteryID">
-
-                <button type="submit" name="lookup_battery" class="btn mt-10">
-                    Lookup Battery
-                </button>
-            </form>
-            <p class="mt-6 small-note">
-                Only batteries not <strong>SOLD</strong> or <strong>SCRAPPED</strong> can be scrapped.
-            </p>
-        </div>
-
-        <!-- Step 2: Confirm Scrap + Reason -->
-        <?php if ($scrapInfo): ?>
-            <div class="card">
-                <h3 style="margin-top:0;">Confirm Scrap</h3>
-                <p><strong>BatteryID:</strong> <?= htmlspecialchars($scrapInfo['BatteryID']) ?></p>
-                <p><strong>Battery:</strong> <?= htmlspecialchars($scrapInfo['Battery']) ?></p>
-                <p><strong>Date Code:</strong> <?= htmlspecialchars($scrapInfo['DateCode']) ?></p>
-                <p><strong>Current Location:</strong> <?= htmlspecialchars($scrapInfo['Location']) ?></p>
-
-                <form method="post" class="mt-10">
-                    <input type="hidden" name="battery_id"
-                           value="<?= htmlspecialchars($scrapInfo['BatteryID']) ?>">
-
-                    <label class="label-block">Reason for Scrap (required, max 255 chars)</label>
-                    <textarea name="reason" maxlength="255"
-                              placeholder="Describe why this battery is being scrapped."><?= isset($_POST['reason']) ? htmlspecialchars($_POST['reason']) : '' ?></textarea>
-
-                    <button type="submit" name="confirm_scrap" class="btn mt-10">
-                        Scrap This Battery
-                    </button>
-                </form>
-
-                <p class="mt-6 small-note">
-                    Reason text will be cleaned (for example, single quotes removed) before being stored in the audit log.
-                </p>
-            </div>
-        <?php endif; ?>
-
-    <?php else: ?>
-
-        <h2>Unknown View</h2>
-        <div class="card">
-            <p class="text-center">
-                Something went wrong. Use the menu to go back.
-            </p>
-            <div class="mt-10 text-center">
-                <a class="btn" href="?view=menu">Back to Menu</a>
-            </div>
-        </div>
-
-    <?php endif; ?>
-
-</div>
-</body>
-</html>
