@@ -5,19 +5,44 @@ $dbName = "Browns";
 $dbUser = "memattyoung";
 $dbPass = "Myoung0996!";
 
-// Simple "password" for managers to access page
-$appPassword = "GoldFish";
-
 // Start session
 session_start();
 
-// ===== LOGIN GATE (NO OUTPUT BEFORE THIS POINT) =====
+// ===== CONNECT TO DB (needed for login + app) =====
+$dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
+
+try {
+    $pdo = new PDO($dsn, $dbUser, $dbPass, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
+    ]);
+} catch (Exception $e) {
+    die("DB connection failed: " . htmlspecialchars($e->getMessage()));
+}
+
+// ===== LOGIN GATE USING EMPLOYEE TABLE (NO OUTPUT BEFORE THIS POINT) =====
 if (!isset($_SESSION['logged_in'])) {
     $error = "";
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        if (!empty($_POST['password']) && $_POST['password'] === $appPassword) {
-            $_SESSION['logged_in'] = true;
+        $inputPassword = trim($_POST['password'] ?? '');
+
+        // Lookup employee by password
+        $stmt = $pdo->prepare("
+            SELECT AAA, FirstName, LastName
+            FROM Employee
+            WHERE Password = :pwd
+            LIMIT 1
+        ");
+        $stmt->execute([':pwd' => $inputPassword]);
+        $emp = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($emp) {
+            // Save employee identity to session
+            $_SESSION['logged_in']  = true;
+            $_SESSION['AAA']        = $emp['AAA'];
+            $_SESSION['FirstName']  = $emp['FirstName'];
+            $_SESSION['LastName']   = $emp['LastName'];
+
             header("Location: " . $_SERVER['PHP_SELF']);
             exit;
         } else {
@@ -29,10 +54,10 @@ if (!isset($_SESSION['logged_in'])) {
     <html>
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Login</title>
+        <title>Browns Towing Battery Program Login</title>
     </head>
     <body style="font-family:sans-serif; max-width:400px; margin:40px auto;">
-        <h2>Enter Password Tuna Marie</h2>
+        <h2>Browns Towing Battery Program Login</h2>
         <?php if (!empty($error)): ?>
             <p style='color:red;'><?= htmlspecialchars($error) ?></p>
         <?php endif; ?>
@@ -46,17 +71,6 @@ if (!isset($_SESSION['logged_in'])) {
     </html>
     <?php
     exit;
-}
-
-// ===== CONNECT TO DB =====
-$dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
-
-try {
-    $pdo = new PDO($dsn, $dbUser, $dbPass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
-    ]);
-} catch (Exception $e) {
-    die("DB connection failed: " . htmlspecialchars($e->getMessage()));
 }
 
 // ===== ROUTING / STATE =====
@@ -175,7 +189,7 @@ if ($view === 'sell') {
             if ($bid === '') {
                 $sellError = "Missing BatteryID.";
             } else {
-                // Re-fetch latest info & ensure not already SOLD
+                // Re-fetch latest info & ensure not already SOLD/SCRAPPED
                 $sql = "
                     SELECT 
                         Battery.BatteryID,
@@ -198,14 +212,16 @@ if ($view === 'sell') {
                     try {
                         $pdo->beginTransaction();
 
-                        $fromLoc = $row['Location'];
+                        $fromLoc   = $row['Location'];
+                        $empId     = $_SESSION['AAA']        ?? 'WEBUSER';
+                        $empName   = ($_SESSION['FirstName'] ?? 'Tuna') . ' ' . ($_SESSION['LastName'] ?? 'Marie');
 
                         // Update Inventory: mark SOLD
                         $update = $pdo->prepare("
                             UPDATE Inventory 
                             SET Location = 'SOLD' 
                             WHERE BatteryID = :bid
-                              AND Inventory.Location NOT IN ('SOLD','SCRAPPED')
+                              AND Location NOT IN ('SOLD','SCRAPPED')
                         ");
                         $update->execute([':bid' => $bid]);
 
@@ -214,9 +230,11 @@ if ($view === 'sell') {
                             INSERT INTO AuditLog
                                 (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer)
                             VALUES
-                                ('WEBUSER', 'Tuna Marie', :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', :fromLoc, 'MOBILE')
+                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', :fromLoc, 'MOBILE')
                         ");
                         $insert->execute([
+                            ':empId'     => $empId,
+                            ':empName'   => $empName,
                             ':fromLoc'   => $fromLoc,
                             ':batteryId' => $row['BatteryID'],
                             ':battery'   => $row['Battery'],
@@ -240,7 +258,7 @@ if ($view === 'sell') {
 
 // ===== TRANSFER BATTERY SECTION =====
 if ($view === 'transfer') {
-    // 1) Build combined destination list: shops first, then trucks, both descending
+    // 1) Build combined destination list: shops first, then trucks, each group descending
     $stmtDest = $pdo->query("
         SELECT Location AS ToLoc, 'SHOP' AS Type
         FROM Location
@@ -251,10 +269,10 @@ if ($view === 'transfer') {
     ");
     $rowsDest = $stmtDest->fetchAll(PDO::FETCH_ASSOC);
 
-    // Deduplicate by ToLoc but keep first Type encountered (SHOP should appear first anyway)
+    // Deduplicate by ToLoc but keep first Type encountered (SHOP should appear first)
     $seen = [];
     foreach ($rowsDest as $r) {
-        $loc = trim($r['ToLoc'] ?? '');
+        $loc  = trim($r['ToLoc'] ?? '');
         $type = $r['Type'] ?? 'TRUCK';
         if ($loc === '') continue;
 
@@ -277,7 +295,7 @@ if ($view === 'transfer') {
             return ($a['Type'] === 'SHOP') ? -1 : 1; // SHOP first
         }
         // Within same type, descending alpha
-        return strcasecmp($b['ToLoc'], $a['ToLoc']);
+        return strcasecmp($b['ToLoc'], $a['ToLoc']) * -1;
     });
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -316,7 +334,7 @@ if ($view === 'transfer') {
                     $fromLoc = $row['Location'];
 
                     if ($fromLoc === $transferTo) {
-                        $transferError = "BatteryID already at location.";
+                        $transferError = "BatteryID already at that location.";
                     } else {
                         $transferPreview = [
                             'BatteryID' => $row['BatteryID'],
@@ -341,14 +359,14 @@ if ($view === 'transfer') {
             if ($bid === '' || $fromLoc === '' || $toLoc === '') {
                 $transferError = "Missing transfer data. Please try again.";
             } elseif ($fromLoc === $toLoc) {
-                $transferError = "BatteryID already at location.";
+                $transferError = "BatteryID already at that location.";
             } else {
                 try {
                     $pdo->beginTransaction();
 
                     // Double-check it's still not SOLD/SCRAPPED and still at fromLoc
                     $check = $pdo->prepare("
-                        SELECT Inventory.Location
+                        SELECT Location
                         FROM Inventory
                         WHERE BatteryID = :bid
                           AND Location NOT IN ('SOLD','SCRAPPED')
@@ -371,14 +389,20 @@ if ($view === 'transfer') {
                             ':bid'   => $bid
                         ]);
 
+                        // Prepare employee info
+                        $empId   = $_SESSION['AAA']        ?? 'WEBUSER';
+                        $empName = ($_SESSION['FirstName'] ?? 'Tuna') . ' ' . ($_SESSION['LastName'] ?? 'Marie');
+
                         // Insert AuditLog
                         $insert = $pdo->prepare("
                             INSERT INTO AuditLog
                                 (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer)
                             VALUES
-                                ('WEBUSER', 'Tuna Marie', :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', :fromLoc, 'MOBILE')
+                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', :fromLoc, 'MOBILE')
                         ");
                         $insert->execute([
+                            ':empId'     => $empId,
+                            ':empName'   => $empName,
                             ':fromLoc'   => $fromLoc,
                             ':toLoc'     => $toLoc,
                             ':batteryId' => $bid,
@@ -653,7 +677,7 @@ if ($view === 'transfer') {
                 </button>
             </form>
             <p class="mt-6" style="font-size:12px; color:#6b7280;">
-                Only batteries not previously <strong>SOLD</strong> are eligible.
+                Only batteries not previously <strong>SOLD</strong> or <strong>SCRAPPED</strong> are eligible.
             </p>
         </div>
 
