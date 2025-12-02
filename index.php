@@ -918,3 +918,214 @@ if ($view === 'menu') {
                         <?php foreach ($invRows as $r): ?>
                             <tr>
                                 <td><?= htmlspecialchars($r['Battery'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($r['Quantity'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($r['Location'] ?? '') ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </table>
+            </div>
+        </div>
+
+    <?php elseif ($view === 'sell'): ?>
+
+        <h2>Sell a Battery</h2>
+
+        <div class="card">
+            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+        </div>
+
+        <?php if (!empty($sellError)): ?>
+            <div class="card msg msg-error">
+                <?= htmlspecialchars($sellError) ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- Step 1: Lookup -->
+        <div class="card">
+            <form method="post">
+                <label class="label-block">BatteryID</label>
+                <input type="text" name="battery_id"
+                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                       placeholder="Enter BatteryID">
+
+                <button type="submit" name="lookup_battery" class="btn mt-10">
+                    Lookup Battery
+                </button>
+            </form>
+            <p class="mt-6 small-note">
+                Only batteries not previously <strong>SOLD</strong> or <strong>SCRAPPED</strong> are eligible.
+            </p>
+        </div>
+
+        <!-- Step 2: Confirm Sale -->
+        <?php if ($sellInfo): ?>
+            <div class="card">
+                <h3 style="margin-top:0;">Confirm Sale</h3>
+                <p><strong>BatteryID:</strong> <?= htmlspecialchars($sellInfo['BatteryID']) ?></p>
+                <p><strong>Battery:</strong> <?= htmlspecialchars($sellInfo['Battery']) ?></p>
+                <p><strong>Date Code:</strong> <?= htmlspecialchars($sellInfo['DateCode']) ?></p>
+                <p><strong>Location:</strong> <?= htmlspecialchars($sellInfo['Location']) ?></p>
+
+                <form method="post" class="mt-10">
+                    <input type="hidden" name="battery_id"
+                           value="<?= htmlspecialchars($sellInfo['BatteryID']) ?>">
+                    <button type="submit" name="confirm_sell" class="btn">
+                        Sell This Battery
+                    </button>
+                </form>
+            </div>
+        <?php endif; ?>
+
+    <?php elseif ($view === 'transfer'): ?>
+
+        <h2>Transfer a Battery</h2>
+
+        <div class="card">
+            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+        </div>
+
+        <?php if (!empty($transferError)): ?>
+            <div class="card msg msg-error">
+                <?= htmlspecialchars($transferError) ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- Step 1: BatteryID + Destination -->
+        <div class="card">
+            <form method="post">
+                <label class="label-block">BatteryID</label>
+                <input type="text" name="battery_id"
+                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                       placeholder="Enter BatteryID">
+
+                <label class="label-block mt-10">Transfer To</label>
+                <select name="to_loc">
+                    <option value="">Select Destination</option>
+                    <?php foreach ($destRows as $d): ?>
+                        <?php
+                        $label = $d['ToLoc'] . ' (' . $d['Type'] . ')';
+                        $val   = $d['ToLoc'];
+                        ?>
+                        <option value="<?= htmlspecialchars($val) ?>"
+                            <?= ($val === ($transferToLoc ?? '')) ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($label) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+
+                <button type="submit" name="preview_transfer" class="btn mt-10">
+                    Preview Transfer
+                </button>
+            </form>
+
+            <p class="mt-6 small-note">
+                Only batteries not <strong>SOLD</strong> or <strong>SCRAPPED</strong> can be transferred.
+            </p>
+        </div>
+
+        <!-- Step 2: Preview + Confirm -->
+        <?php if ($transferPreview): ?>
+            <div class="card">
+                <h3 style="margin-top:0;">Confirm Transfer</h3>
+                <p><strong>BatteryID:</strong> <?= htmlspecialchars($transferPreview['BatteryID']) ?></p>
+                <p><strong>Battery:</strong> <?= htmlspecialchars($transferPreview['Battery']) ?></p>
+                <p><strong>Date Code:</strong> <?= htmlspecialchars($transferPreview['DateCode']) ?></p>
+                <p><strong>From Location:</strong> <?= htmlspecialchars($transferPreview['FromLoc']) ?></p>
+                <p><strong>To Location:</strong> <?= htmlspecialchars($transferPreview['ToLoc']) ?></p>
+
+                <form method="post" class="mt-10">
+                    <input type="hidden" name="battery_id"
+                           value="<?= htmlspecialchars($transferPreview['BatteryID']) ?>">
+                    <input type="hidden" name="from_loc"
+                           value="<?= htmlspecialchars($transferPreview['FromLoc']) ?>">
+                    <input type="hidden" name="to_loc"
+                           value="<?= htmlspecialchars($transferPreview['ToLoc']) ?>">
+                    <input type="hidden" name="battery"
+                           value="<?= htmlspecialchars($transferPreview['Battery']) ?>">
+                    <input type="hidden" name="date_code"
+                           value="<?= htmlspecialchars($transferPreview['DateCode']) ?>">
+
+                    <button type="submit" name="confirm_transfer" class="btn">
+                        Confirm Transfer
+                    </button>
+                </form>
+            </div>
+        <?php endif; ?>
+
+    <?php elseif ($view === 'scrap'): ?>
+
+        <h2>Scrap a Battery</h2>
+
+        <div class="card">
+            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+        </div>
+
+        <?php if (!empty($scrapError)): ?>
+            <div class="card msg msg-error">
+                <?= htmlspecialchars($scrapError) ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- Step 1: Lookup -->
+        <div class="card">
+            <form method="post">
+                <label class="label-block">BatteryID</label>
+                <input type="text" name="battery_id"
+                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                       placeholder="Enter BatteryID">
+
+                <button type="submit" name="lookup_battery" class="btn mt-10">
+                    Lookup Battery
+                </button>
+            </form>
+            <p class="mt-6 small-note">
+                Only batteries not <strong>SOLD</strong> or <strong>SCRAPPED</strong> can be scrapped.
+            </p>
+        </div>
+
+        <!-- Step 2: Confirm Scrap + Reason -->
+        <?php if ($scrapInfo): ?>
+            <div class="card">
+                <h3 style="margin-top:0;">Confirm Scrap</h3>
+                <p><strong>BatteryID:</strong> <?= htmlspecialchars($scrapInfo['BatteryID']) ?></p>
+                <p><strong>Battery:</strong> <?= htmlspecialchars($scrapInfo['Battery']) ?></p>
+                <p><strong>Date Code:</strong> <?= htmlspecialchars($scrapInfo['DateCode']) ?></p>
+                <p><strong>Current Location:</strong> <?= htmlspecialchars($scrapInfo['Location']) ?></p>
+
+                <form method="post" class="mt-10">
+                    <input type="hidden" name="battery_id"
+                           value="<?= htmlspecialchars($scrapInfo['BatteryID']) ?>">
+
+                    <label class="label-block">Reason for Scrap (required, max 255 chars)</label>
+                    <textarea name="reason" maxlength="255"
+                              placeholder="Describe why this battery is being scrapped."><?= isset($_POST['reason']) ? htmlspecialchars($_POST['reason']) : '' ?></textarea>
+
+                    <button type="submit" name="confirm_scrap" class="btn mt-10">
+                        Scrap This Battery
+                    </button>
+                </form>
+
+                <p class="mt-6 small-note">
+                    Reason text will be cleaned (for example, single quotes removed) before being stored in the audit log.
+                </p>
+            </div>
+        <?php endif; ?>
+
+    <?php else: ?>
+
+        <h2>Unknown View</h2>
+        <div class="card">
+            <p class="text-center">
+                Something went wrong. Use the menu to go back.
+            </p>
+            <div class="mt-10 text-center">
+                <a class="btn" href="?view=menu">Back to Menu</a>
+            </div>
+        </div>
+
+    <?php endif; ?>
+
+</div>
+</body>
+</html>
