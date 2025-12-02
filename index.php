@@ -92,11 +92,27 @@ if (!isset($_SESSION['logged_in'])) {
                 $emp = $stmtEmp->fetch(PDO::FETCH_ASSOC);
 
                 if ($emp) {
+                    $empId   = $emp['AAA'];
+                    $empName = $emp['FirstName'] . " " . $emp['LastName'];
+
+                    // Insert AuditLog record for Log On
+                    $insertLogin = $pdoLogin->prepare("
+                        INSERT INTO AuditLog
+                            (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate) 
+                        VALUES
+                            (:empId, :empName, '', '', '', 'Log On', '', '', '', '', '', 'MOBILE', NOW())
+                    ");
+                    $insertLogin->execute([
+                        ':empId'   => $empId,
+                        ':empName' => $empName,
+                    ]);
+
+                    // Set session
                     $_SESSION['logged_in']  = true;
-                    $_SESSION['empAAA']     = $emp['AAA'];
+                    $_SESSION['empAAA']     = $empId;
                     $_SESSION['empFirst']   = $emp['FirstName'];
                     $_SESSION['empLast']    = $emp['LastName'];
-                    $_SESSION['empName']    = $emp['FirstName'] . " " . $emp['LastName'];
+                    $_SESSION['empName']    = $empName;
                     $_SESSION['last_activity'] = time(); // start timeout timer
 
                     header("Location: " . $_SERVER['PHP_SELF']);
@@ -322,9 +338,9 @@ if ($view === 'sell') {
                         // Insert AuditLog
                         $insert = $pdo->prepare("
                             INSERT INTO AuditLog
-                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer)
+                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate)
                             VALUES
-                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', :fromLoc, 'MOBILE')
+                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', NOW())
                         ");
                         $insert->execute([
                             ':empId'    => $empAAA,
@@ -480,9 +496,9 @@ if ($view === 'transfer') {
                         // Insert AuditLog
                         $insert = $pdo->prepare("
                             INSERT INTO AuditLog
-                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer)
+                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate)
                             VALUES
-                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', :fromLoc, 'MOBILE')
+                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', NOW())
                         ");
                         $insert->execute([
                             ':empId'    => $empAAA,
@@ -597,9 +613,9 @@ if ($view === 'scrap') {
                             // Insert AuditLog (ToLoc = SCRAPPED, Reason = user text)
                             $insert = $pdo->prepare("
                                 INSERT INTO AuditLog
-                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer)
+                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate)
                                 VALUES
-                                    (:empId, :empName, :fromLoc, 'SCRAPPED', :batteryId, 'Scrap', '', :battery, :dateCode, :reason, :fromLoc, 'MOBILE')
+                                    (:empId, :empName, :fromLoc, 'SCRAPPED', :batteryId, 'Scrap', '', :battery, :dateCode, :reason, :fromLoc, 'MOBILE', NOW())
                             ");
                             $insert->execute([
                                 ':empId'    => $empAAA,
