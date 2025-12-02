@@ -946,9 +946,18 @@ if ($view === 'menu') {
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
-                <input type="text" name="battery_id"
-                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
-                       placeholder="Enter BatteryID">
+                <div style="display:flex; gap:6px;">
+                    <input type="text" name="battery_id" id="sell_battery_id"
+                           style="flex:1;"
+                           value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                           placeholder="Enter or Scan BatteryID">
+                    <button type="button"
+                            onclick="openScanner('sell_battery_id')"
+                            class="btn"
+                            style="width:auto; padding:0 10px;">
+                        Scan
+                    </button>
+                </div>
 
                 <button type="submit" name="lookup_battery" class="btn mt-10">
                     Lookup Battery
@@ -996,9 +1005,18 @@ if ($view === 'menu') {
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
-                <input type="text" name="battery_id"
-                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
-                       placeholder="Enter BatteryID">
+                <div style="display:flex; gap:6px;">
+                    <input type="text" name="battery_id" id="transfer_battery_id"
+                           style="flex:1;"
+                           value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                           placeholder="Enter or Scan BatteryID">
+                    <button type="button"
+                            onclick="openScanner('transfer_battery_id')"
+                            class="btn"
+                            style="width:auto; padding:0 10px;">
+                        Scan
+                    </button>
+                </div>
 
                 <label class="label-block mt-10">Transfer To</label>
                 <select name="to_loc">
@@ -1072,9 +1090,18 @@ if ($view === 'menu') {
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
-                <input type="text" name="battery_id"
-                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
-                       placeholder="Enter BatteryID">
+                <div style="display:flex; gap:6px;">
+                    <input type="text" name="battery_id" id="scrap_battery_id"
+                           style="flex:1;"
+                           value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                           placeholder="Enter or Scan BatteryID">
+                    <button type="button"
+                            onclick="openScanner('scrap_battery_id')"
+                            class="btn"
+                            style="width:auto; padding:0 10px;">
+                        Scan
+                    </button>
+                </div>
 
                 <button type="submit" name="lookup_battery" class="btn mt-10">
                     Lookup Battery
@@ -1142,5 +1169,129 @@ if ($view === 'menu') {
     <?php endif; ?>
 
 </div>
+
+<!-- Barcode Scanner Modal -->
+<div id="scannerOverlay" style="
+    display:none;
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.8);
+    z-index:9999;
+    align-items:center;
+    justify-content:center;
+">
+    <div style="background:#fff; padding:10px; border-radius:8px; max-width:400px; width:90%; text-align:center;">
+        <h3 style="margin-top:0;">Scan Battery Barcode</h3>
+        <video id="scannerVideo" style="width:100%; max-height:300px; background:#000;"></video>
+        <p style="font-size:12px; color:#6b7280; margin-top:6px;">
+            Align the barcode within the frame until it is detected.
+        </p>
+        <button type="button" onclick="closeScanner()" style="
+            margin-top:10px;
+            padding:8px 12px;
+            border:none;
+            border-radius:6px;
+            background:#4b5563;
+            color:#fff;
+        ">
+            Cancel
+        </button>
+    </div>
+</div>
+
+<!-- ZXing and scanner script -->
+<script src="https://unpkg.com/@zxing/library@latest"></script>
+<script>
+    let selectedInputId = null;
+    let codeReader = null;
+    let currentStream = null;
+    let audioCtx = null;
+
+    function playBeep() {
+        try {
+            if (!audioCtx) {
+                const AC = window.AudioContext || window.webkitAudioContext;
+                if (!AC) return;
+                audioCtx = new AC();
+            }
+            const duration = 0.15; // seconds
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        } catch (e) {
+            console.warn('Beep failed:', e);
+        }
+    }
+
+    async function openScanner(inputId) {
+        selectedInputId = inputId;
+        const overlay = document.getElementById('scannerOverlay');
+        const video = document.getElementById('scannerVideo');
+
+        overlay.style.display = 'flex';
+
+        if (!codeReader) {
+            codeReader = new ZXing.BrowserMultiFormatReader();
+        }
+
+        try {
+            const constraints = {
+                video: {
+                    facingMode: { ideal: 'environment' }
+                }
+            };
+
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            currentStream = stream;
+            video.srcObject = stream;
+            video.setAttribute('playsinline', true);
+            await video.play();
+
+            codeReader.decodeFromVideoDevice(null, 'scannerVideo', (result, err) => {
+                if (result) {
+                    // Got a barcode
+                    const input = document.getElementById(selectedInputId);
+                    if (input) {
+                        input.value = result.text;
+                    }
+                    playBeep();
+                    closeScanner();
+                }
+                // err is often just NotFoundException while scanning; safe to ignore
+            });
+        } catch (e) {
+            console.error(e);
+            alert('Unable to access camera. Please check permissions.');
+            closeScanner();
+        }
+    }
+
+    function closeScanner() {
+        const overlay = document.getElementById('scannerOverlay');
+        overlay.style.display = 'none';
+
+        if (codeReader) {
+            try {
+                codeReader.reset();
+            } catch (e) {
+                console.warn(e);
+            }
+        }
+
+        // Stop camera stream
+        if (currentStream) {
+            currentStream.getTracks().forEach(t => t.stop());
+            currentStream = null;
+        }
+    }
+</script>
 </body>
 </html>
