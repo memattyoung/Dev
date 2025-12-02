@@ -5,8 +5,59 @@ $dbName = "Browns";
 $dbUser = "memattyoung";
 $dbPass = "Myoung0996!";
 
+// Force PHP timezone to Eastern
+date_default_timezone_set('America/New_York');
+
 // Start session
 session_start();
+
+// ===== LOGOUT HANDLER =====
+if (isset($_GET['logout'])) {
+    // Clear session data
+    $_SESSION = [];
+    if (ini_get("session.use_cookies")) {
+        $params = session_get_cookie_params();
+        setcookie(
+            session_name(),
+            '',
+            time() - 42000,
+            $params["path"],
+            $params["domain"],
+            $params["secure"],
+            $params["httponly"]
+        );
+    }
+    session_destroy();
+    header("Location: " . $_SERVER['PHP_SELF']);
+    exit;
+}
+
+// ===== SESSION TIMEOUT (5 MINUTES) =====
+$timeoutSeconds = 300; // 5 minutes
+if (isset($_SESSION['logged_in'])) {
+    if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > $timeoutSeconds)) {
+        // Session expired
+        $_SESSION = [];
+        if (ini_get("session.use_cookies")) {
+            $params = session_get_cookie_params();
+            setcookie(
+                session_name(),
+                '',
+                time() - 42000,
+                $params["path"],
+                $params["domain"],
+                $params["secure"],
+                $params["httponly"]
+            );
+        }
+        session_destroy();
+        header("Location: " . $_SERVER['PHP_SELF'] . "?msg=timeout");
+        exit;
+    } else {
+        // Still active, refresh timer
+        $_SESSION['last_activity'] = time();
+    }
+}
 
 // ===== LOGIN GATE (NO OUTPUT BEFORE THIS POINT) =====
 if (!isset($_SESSION['logged_in'])) {
@@ -24,6 +75,8 @@ if (!isset($_SESSION['logged_in'])) {
                 $pdoLogin = new PDO($dsnLogin, $dbUser, $dbPass, [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
                 ]);
+                // Force MySQL connection time zone to Eastern Standard Time
+                $pdoLogin->exec("SET time_zone = '-05:00'");
 
                 $sqlEmp = "
                     SELECT AAA, FirstName, LastName
@@ -44,6 +97,7 @@ if (!isset($_SESSION['logged_in'])) {
                     $_SESSION['empFirst']   = $emp['FirstName'];
                     $_SESSION['empLast']    = $emp['LastName'];
                     $_SESSION['empName']    = $emp['FirstName'] . " " . $emp['LastName'];
+                    $_SESSION['last_activity'] = time(); // start timeout timer
 
                     header("Location: " . $_SERVER['PHP_SELF']);
                     exit;
@@ -65,6 +119,13 @@ if (!isset($_SESSION['logged_in'])) {
     </head>
     <body style="font-family:sans-serif; max-width:400px; margin:40px auto;">
         <h2 style="text-align:center;">Browns Towing Battery Program Login</h2>
+
+        <?php if (isset($_GET['msg']) && $_GET['msg'] === 'timeout'): ?>
+            <p style="color:orange;">
+                Your session has expired due to inactivity. Please log in again.
+            </p>
+        <?php endif; ?>
+
         <?php if (!empty($error)): ?>
             <p style="color:red;"><?= htmlspecialchars($error) ?></p>
         <?php endif; ?>
@@ -97,6 +158,8 @@ try {
     $pdo = new PDO($dsn, $dbUser, $dbPass, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
     ]);
+    // Force MySQL connection time zone to Eastern Standard Time
+    $pdo->exec("SET time_zone = '-05:00'");
 } catch (Exception $e) {
     die("DB connection failed: " . htmlspecialchars($e->getMessage()));
 }
@@ -121,6 +184,8 @@ $destRows        = [];
 
 $scrapError      = "";
 $scrapInfo       = null;
+
+$soldTodayCount  = 0;
 
 // ===== INVENTORY SECTION =====
 if ($view === 'inventory') {
@@ -563,6 +628,23 @@ if ($view === 'scrap') {
     }
 }
 
+// ===== SOLD TODAY COUNT (MENU ONLY) =====
+if ($view === 'menu') {
+    try {
+        $stmtSold = $pdo->prepare("
+            SELECT COUNT(*) AS cnt
+            FROM AuditLog
+            WHERE EmployeeID = :empId
+              AND ToLoc = 'SOLD'
+              AND DATE(LastUpdate) = CURRENT_DATE
+        ");
+        $stmtSold->execute([':empId' => $empAAA]);
+        $soldTodayCount = (int)$stmtSold->fetchColumn();
+    } catch (Exception $e) {
+        $soldTodayCount = 0; // fail quietly
+    }
+}
+
 ?>
 <!doctype html>
 <html>
@@ -732,6 +814,19 @@ if ($view === 'scrap') {
                 Logged in as <strong><?= htmlspecialchars($empName) ?></strong> (<?= htmlspecialchars($empAAA) ?>).<br>
                 Use the buttons above to manage batteries.
             </p>
+
+            <?php if ($soldTodayCount > 0): ?>
+                <p class="text-center" style="font-size:13px; color:#166534; margin-top:6px;">
+                    You have sold <strong><?= $soldTodayCount ?></strong>
+                    battery<?= ($soldTodayCount === 1 ? '' : 'ies') ?> so far today.
+                </p>
+            <?php endif; ?>
+
+            <div class="text-center mt-10">
+                <a href="?logout=1" class="btn btn-secondary" style="max-width:200px; display:inline-block;">
+                    Logout
+                </a>
+            </div>
         </div>
 
     <?php elseif ($view === 'inventory'): ?>
