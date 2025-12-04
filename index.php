@@ -206,15 +206,16 @@ $historyRows     = [];
 $soldTodayCount  = 0;
 
 // Stock Truck
-$stockTruckError          = "";
-$stockTruckMessage        = "";
-$stockTruckSelectedTruck  = "";
-$stockTruckSelectedShop   = "";
-$stockTruckRows           = [];
-$stockTruckTruckList      = [];
-$stockTruckShopList       = [];
-$stockTruckDidShowQuery   = false;
-$stockTruckShowConfirmClear = false;
+$stockTruckError             = "";
+$stockTruckMessage           = "";
+$stockTruckSelectedTruck     = "";
+$stockTruckSelectedShop      = "";
+$stockTruckRows              = [];
+$stockTruckTruckList         = [];
+$stockTruckShopList          = [];
+$stockTruckDidShowQuery      = false;
+$stockTruckShowConfirmClear  = false;
+$stockTruckTransferBatteryId = "";
 
 // ===== INVENTORY SECTION =====
 if ($view === 'inventory') {
@@ -410,12 +411,12 @@ if ($view === 'transfer') {
         ];
     }
 
-    // Sort: shops first, then trucks; each group descending by name
+    // Sort: shops first, then trucks; each group ascending by name
     usort($destRows, function($a, $b) {
         if ($a['Type'] !== $b['Type']) {
             return ($a['Type'] === 'SHOP') ? -1 : 1;
         }
-        return strcasecmp($b['ToLoc'], $a['ToLoc']);
+        return strcasecmp($a['ToLoc'], $b['ToLoc']);
     });
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -691,8 +692,9 @@ if ($view === 'stocktruck') {
     $stockTruckShopList = $stmtShops->fetchAll(PDO::FETCH_COLUMN);
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $stockTruckSelectedTruck = trim($_POST['truck'] ?? '');
-        $stockTruckSelectedShop  = trim($_POST['shop_loc'] ?? '');
+        $stockTruckSelectedTruck     = trim($_POST['truck'] ?? '');
+        $stockTruckSelectedShop      = trim($_POST['shop_loc'] ?? '');
+        $stockTruckTransferBatteryId = trim($_POST['battery_id'] ?? $stockTruckTransferBatteryId);
 
         // Helper function to run the stock query
         $runStockQuery = function($pdo, $truck) {
@@ -748,7 +750,118 @@ if ($view === 'stocktruck') {
             if ($stockTruckSelectedTruck === '') {
                 $stockTruckError = "Please select a truck.";
             } else {
-                $stockTruckRows       = $runStockQuery($pdo, $stockTruckSelectedTruck);
+                $stockTruckRows          = $runStockQuery($pdo, $stockTruckSelectedTruck);
+                $stockTruckDidShowQuery  = true;
+            }
+        }
+
+        // Step: Transfer battery to this truck
+        elseif (isset($_POST['transfer_to_truck'])) {
+            $stockTruckDidShowQuery = true;
+            $stockTruckShowConfirmClear = false;
+
+            if ($stockTruckSelectedTruck === '') {
+                $stockTruckError = "Please select a truck before transferring.";
+            } elseif ($stockTruckTransferBatteryId === '') {
+                $stockTruckError = "Please enter a BatteryID to transfer.";
+            } else {
+                // Same logic as Transfer, but ToLoc = current truck
+                $bid = $stockTruckTransferBatteryId;
+
+                try {
+                    // Check battery status
+                    $sql = "
+                        SELECT 
+                            Inventory.BatteryID,
+                            Inventory.Battery,
+                            Inventory.DateCode,
+                            Inventory.Location
+                        FROM Inventory
+                        WHERE Inventory.BatteryID = :bid
+                          AND Inventory.Location NOT IN ('SOLD','SCRAPPED')
+                          AND Inventory.StockType = 'BATTERY'
+                    ";
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute([':bid' => $bid]);
+                    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                    if (!$row) {
+                        $stockTruckError = "Battery not found, or it is SOLD/SCRAPPED.";
+                    } elseif ($row['Location'] === $stockTruckSelectedTruck) {
+                        $stockTruckError = "Battery is already on truck " . $stockTruckSelectedTruck . ".";
+                    } else {
+                        $fromLoc = $row['Location'];
+                        $toLoc   = $stockTruckSelectedTruck;
+                        $battery = $row['Battery'];
+                        $dateCode= $row['DateCode'];
+
+                        $pdo->beginTransaction();
+
+                        // Re-check current location in transaction
+                        $check = $pdo->prepare("
+                            SELECT Location
+                            FROM Inventory
+                            WHERE BatteryID = :bid
+                              AND Location NOT IN ('SOLD','SCRAPPED')
+                              AND StockType = 'BATTERY'
+                        ");
+                        $check->execute([':bid' => $bid]);
+                        $current = $check->fetch(PDO::FETCH_ASSOC);
+
+                        if (!$current || $current['Location'] !== $fromLoc) {
+                            $pdo->rollBack();
+                            $stockTruckError = "Battery location changed or is now SOLD/SCRAPPED. Refresh and try again.";
+                        } else {
+                            $now = date('Y-m-d H:i:s');
+
+                            // Update Inventory
+                            $update = $pdo->prepare("
+                                UPDATE Inventory
+                                SET Location = :toLoc
+                                WHERE BatteryID = :bid
+                                  AND StockType = 'BATTERY'
+                            ");
+                            $update->execute([
+                                ':toLoc' => $toLoc,
+                                ':bid'   => $bid
+                            ]);
+
+                            // Insert AuditLog
+                            $insert = $pdo->prepare("
+                                INSERT INTO AuditLog
+                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity)
+                                VALUES
+                                    (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
+                            ");
+                            $insert->execute([
+                                ':empId'      => $empAAA,
+                                ':empName'    => $empName,
+                                ':fromLoc'    => $fromLoc,
+                                ':toLoc'      => $toLoc,
+                                ':batteryId'  => $bid,
+                                ':battery'    => $battery,
+                                ':dateCode'   => $dateCode,
+                                ':lastUpdate' => $now,
+                            ]);
+
+                            $pdo->commit();
+
+                            $stockTruckMessage           = "Battery $bid transferred to truck $toLoc.";
+                            $stockTruckTransferBatteryId = ""; // clear BatteryID after transfer
+                        }
+                    }
+
+                } catch (Exception $e) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    $stockTruckError = "Error transferring battery to truck: " . $e->getMessage();
+                }
+            }
+
+            // Always rerun query (if truck selected)
+            if ($stockTruckSelectedTruck !== '') {
+                $stockTruckRows         = $runStockQuery($pdo, $stockTruckSelectedTruck);
                 $stockTruckDidShowQuery = true;
             }
         }
@@ -758,8 +871,8 @@ if ($view === 'stocktruck') {
             if ($stockTruckSelectedTruck === '') {
                 $stockTruckError = "Please select a truck before clearing.";
             } else {
-                $stockTruckRows         = $runStockQuery($pdo, $stockTruckSelectedTruck);
-                $stockTruckDidShowQuery = true;
+                $stockTruckRows            = $runStockQuery($pdo, $stockTruckSelectedTruck);
+                $stockTruckDidShowQuery    = true;
                 $stockTruckShowConfirmClear = true;
             }
         }
@@ -828,11 +941,11 @@ if ($view === 'stocktruck') {
 
                         $pdo->commit();
 
-                        $stockTruckMessage = "Truck " . $stockTruckSelectedTruck .
+                        $stockTruckMessage           = "Truck " . $stockTruckSelectedTruck .
                             " inventory successfully moved to " . $stockTruckSelectedShop . ".";
-                        $stockTruckRows           = [];
-                        $stockTruckShowConfirmClear = false;
-                        $stockTruckDidShowQuery   = true;
+                        $stockTruckRows              = [];
+                        $stockTruckShowConfirmClear  = false;
+                        $stockTruckDidShowQuery      = true;
                     }
 
                 } catch (Exception $e) {
@@ -1450,6 +1563,40 @@ if ($view === 'menu') {
                         <?php endif; ?>
                     </table>
                 </div>
+                <p class="small-note mt-6">
+                    Negative Need means the truck currently has more than its defined minimum; those values are shown in red.
+                </p>
+            </div>
+        <?php endif; ?>
+
+        <!-- Transfer battery TO this truck (only after query) -->
+        <?php if ($stockTruckDidShowQuery && $stockTruckSelectedTruck !== ''): ?>
+            <div class="card">
+                <h3 style="margin-top:0;">Transfer Battery to This Truck</h3>
+                <form method="post">
+                    <input type="hidden" name="truck" value="<?= htmlspecialchars($stockTruckSelectedTruck) ?>">
+
+                    <label class="label-block">BatteryID</label>
+                    <div style="display:flex; gap:6px;">
+                        <input type="text" name="battery_id" id="stocktruck_transfer_battery_id"
+                               style="flex:1;"
+                               value="<?= htmlspecialchars($stockTruckTransferBatteryId ?? '') ?>"
+                               placeholder="Enter or Scan BatteryID">
+                        <button type="button"
+                                onclick="openScanner('stocktruck_transfer_battery_id')"
+                                class="btn"
+                                style="width:auto; padding:0 10px;">
+                            Scan
+                        </button>
+                    </div>
+
+                    <button type="submit" name="transfer_to_truck" class="btn mt-10">
+                        Transfer Battery to <?= htmlspecialchars($stockTruckSelectedTruck) ?>
+                    </button>
+                </form>
+                <p class="mt-6 small-note">
+                    Uses the same transfer logic as the Transfer Battery screen, but sends the battery directly to this truck.
+                </p>
             </div>
         <?php endif; ?>
 
