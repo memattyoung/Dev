@@ -97,9 +97,9 @@ if (!isset($_SESSION['logged_in'])) {
                     // Insert AuditLog record for Log On
                     $insertLogin = $pdoLogin->prepare("
                         INSERT INTO AuditLog
-                            (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate) 
+                            (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType) 
                         VALUES
-                            (:empId, :empName, '', '', '', 'Log On', '', '', '', '', '', 'MOBILE', :lastUpdate)
+                            (:empId, :empName, '', '', '', 'Log On', '', '', '', '', '', 'MOBILE', :lastUpdate, 'BATTERY')
                     ");
                     $insertLogin->execute([
                         ':empId'      => $empId,
@@ -340,9 +340,9 @@ if ($view === 'sell') {
                         // Insert AuditLog
                         $insert = $pdo->prepare("
                             INSERT INTO AuditLog
-                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate)
+                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType)
                             VALUES
-                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', :lastUpdate)
+                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', :lastUpdate, 'BATTERY')
                         ");
                         $insert->execute([
                             ':empId'      => $empAAA,
@@ -507,9 +507,9 @@ if ($view === 'transfer') {
                         // Insert AuditLog
                         $insert = $pdo->prepare("
                             INSERT INTO AuditLog
-                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate)
+                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType)
                             VALUES
-                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', :lastUpdate)
+                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', :lastUpdate, 'BATTERY')
                         ");
                         $insert->execute([
                             ':empId'      => $empAAA,
@@ -627,9 +627,9 @@ if ($view === 'scrap') {
                             // Insert AuditLog (ToLoc = SCRAPPED, Reason = user text)
                             $insert = $pdo->prepare("
                                 INSERT INTO AuditLog
-                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate)
+                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType)
                                 VALUES
-                                    (:empId, :empName, :fromLoc, 'SCRAPPED', :batteryId, 'Scrap', '', :battery, :dateCode, :reason, :fromLoc, 'MOBILE', :lastUpdate)
+                                    (:empId, :empName, :fromLoc, 'SCRAPPED', :batteryId, 'Scrap', '', :battery, :dateCode, :reason, :fromLoc, 'MOBILE', :lastUpdate, 'BATTERY')
                             ");
                             $insert->execute([
                                 ':empId'      => $empAAA,
@@ -663,9 +663,17 @@ if ($view === 'scrap') {
 if ($view === 'history') {
     try {
         $stmtHist = $pdo->prepare("
-            SELECT BatteryID, Battery, Type, ToLoc, FromLoc, LastUpdate
+            SELECT 
+                BatteryID,
+                Battery,
+                Type,
+                ToLoc,
+                FromLoc,
+                LastUpdate
             FROM AuditLog
             WHERE EmployeeID = :empId
+              AND StockType = 'BATTERY'
+              AND Type NOT IN ('Log On', 'Receive')
             ORDER BY LastUpdate DESC
             LIMIT 25
         ");
@@ -1184,7 +1192,7 @@ if ($view === 'menu') {
 
         <div class="card">
             <p class="small-note">
-                Showing the most recent 25 events for <strong><?= htmlspecialchars($empAAA) ?></strong>.
+                Showing the most recent 25 events for <strong><?= htmlspecialchars($empName) ?></strong>.
             </p>
             <div class="table-container">
                 <table>
@@ -1203,11 +1211,11 @@ if ($view === 'menu') {
                     <?php else: ?>
                         <?php foreach ($historyRows as $row): ?>
                             <tr>
-                                <td><?= htmlspecialchars($row['BatteryID'] ?? '') ?></td>
-                                <td><?= htmlspecialchars($row['Battery']   ?? '') ?></td>
-                                <td><?= htmlspecialchars($row['Type']      ?? '') ?></td>
-                                <td><?= htmlspecialchars($row['FromLoc']   ?? '') ?></td>
-                                <td><?= htmlspecialchars($row['ToLoc']     ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['BatteryID']  ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['Battery']    ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['Type']       ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['FromLoc']    ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['ToLoc']      ?? '') ?></td>
                                 <td><?= htmlspecialchars($row['LastUpdate'] ?? '') ?></td>
                             </tr>
                         <?php endforeach; ?>
