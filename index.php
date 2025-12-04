@@ -206,16 +206,16 @@ if ($view === 'inventory') {
     $selectedLocation = isset($_GET['loc']) ? trim($_GET['loc']) : '';
     $selectedBattery  = isset($_GET['bat']) ? trim($_GET['bat']) : '';
 
-    // Dropdown data (NO SOLD / SCRAPPED)
+    // Dropdown data (NO SOLD / SCRAPPED) - INVENTORY ONLY, BATTERY STOCKTYPE
     $sqlAll = "
         SELECT 
-            Battery.Battery AS Battery,
+            Inventory.Battery AS Battery,
             Inventory.Location AS Location
-        FROM Battery
-        JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
+        FROM Inventory
         WHERE Inventory.Location NOT IN ('SOLD','SCRAPPED')
-        GROUP BY Battery.Battery, Inventory.Location
-        ORDER BY Battery.Battery, Inventory.Location
+          AND Inventory.StockType = 'BATTERY'
+        GROUP BY Inventory.Battery, Inventory.Location
+        ORDER BY Inventory.Battery, Inventory.Location
     ";
     $stmtAll = $pdo->query($sqlAll);
     $allRows = $stmtAll->fetchAll(PDO::FETCH_ASSOC);
@@ -229,15 +229,15 @@ if ($view === 'inventory') {
         }
     }
 
-    // Aggregated query (NO SOLD / SCRAPPED)
+    // Aggregated query (NO SOLD / SCRAPPED) - INVENTORY ONLY, BATTERY STOCKTYPE
     $sql = "
         SELECT 
-            Battery.Battery AS Battery,
-            COUNT(Battery.Battery) AS Quantity,
+            Inventory.Battery AS Battery,
+            COUNT(*) AS Quantity,
             Inventory.Location AS Location
-        FROM Battery
-        JOIN Inventory ON Battery.BatteryID = Inventory.BatteryID
+        FROM Inventory
         WHERE Inventory.Location NOT IN ('SOLD','SCRAPPED')
+          AND Inventory.StockType = 'BATTERY'
     ";
     $params = [];
 
@@ -246,13 +246,13 @@ if ($view === 'inventory') {
         $params[':loc'] = $selectedLocation;
     }
     if ($selectedBattery !== '') {
-        $sql .= " AND Battery.Battery = :bat";
+        $sql .= " AND Inventory.Battery = :bat";
         $params[':bat'] = $selectedBattery;
     }
 
     $sql .= "
-        GROUP BY Battery.Battery, Inventory.Location
-        ORDER BY Battery.Battery, Inventory.Location
+        GROUP BY Inventory.Battery, Inventory.Location
+        ORDER BY Inventory.Battery, Inventory.Location
     ";
 
     $stmt = $pdo->prepare($sql);
@@ -273,15 +273,14 @@ if ($view === 'sell') {
             } else {
                 $sql = "
                     SELECT 
-                        Battery.BatteryID,
-                        Battery.Battery,
-                        Battery.DateCode,
+                        Inventory.BatteryID,
+                        Inventory.Battery,
+                        Inventory.DateCode,
                         Inventory.Location
-                    FROM Battery
-                    JOIN Inventory 
-                      ON Battery.BatteryID = Inventory.BatteryID
-                    WHERE Battery.BatteryID = :bid
+                    FROM Inventory
+                    WHERE Inventory.BatteryID = :bid
                       AND Inventory.Location NOT IN ('SOLD','SCRAPPED')
+                      AND Inventory.StockType = 'BATTERY'
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $inputId]);
@@ -302,15 +301,14 @@ if ($view === 'sell') {
             } else {
                 $sql = "
                     SELECT 
-                        Battery.BatteryID,
-                        Battery.Battery,
-                        Battery.DateCode,
+                        Inventory.BatteryID,
+                        Inventory.Battery,
+                        Inventory.DateCode,
                         Inventory.Location
-                    FROM Battery
-                    JOIN Inventory 
-                      ON Battery.BatteryID = Inventory.BatteryID
-                    WHERE Battery.BatteryID = :bid
+                    FROM Inventory
+                    WHERE Inventory.BatteryID = :bid
                       AND Inventory.Location NOT IN ('SOLD','SCRAPPED')
+                      AND Inventory.StockType = 'BATTERY'
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $bid]);
@@ -331,6 +329,7 @@ if ($view === 'sell') {
                             SET Location = 'SOLD' 
                             WHERE BatteryID = :bid
                               AND Location NOT IN ('SOLD','SCRAPPED')
+                              AND StockType = 'BATTERY'
                         ");
                         $update->execute([':bid' => $bid]);
 
@@ -419,15 +418,14 @@ if ($view === 'transfer') {
             } else {
                 $sql = "
                     SELECT 
-                        Battery.BatteryID,
-                        Battery.Battery,
-                        Battery.DateCode,
+                        Inventory.BatteryID,
+                        Inventory.Battery,
+                        Inventory.DateCode,
                         Inventory.Location
-                    FROM Battery
-                    JOIN Inventory 
-                      ON Battery.BatteryID = Inventory.BatteryID
-                    WHERE Battery.BatteryID = :bid
+                    FROM Inventory
+                    WHERE Inventory.BatteryID = :bid
                       AND Inventory.Location NOT IN ('SOLD','SCRAPPED')
+                      AND Inventory.StockType = 'BATTERY'
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $bid]);
@@ -474,6 +472,7 @@ if ($view === 'transfer') {
                         FROM Inventory
                         WHERE BatteryID = :bid
                           AND Location NOT IN ('SOLD','SCRAPPED')
+                          AND StockType = 'BATTERY'
                     ");
                     $check->execute([':bid' => $bid]);
                     $current = $check->fetch(PDO::FETCH_ASSOC);
@@ -489,6 +488,7 @@ if ($view === 'transfer') {
                             UPDATE Inventory
                             SET Location = :toLoc
                             WHERE BatteryID = :bid
+                              AND StockType = 'BATTERY'
                         ");
                         $update->execute([
                             ':toLoc' => $toLoc,
@@ -541,15 +541,14 @@ if ($view === 'scrap') {
             } else {
                 $sql = "
                     SELECT 
-                        Battery.BatteryID,
-                        Battery.Battery,
-                        Battery.DateCode,
+                        Inventory.BatteryID,
+                        Inventory.Battery,
+                        Inventory.DateCode,
                         Inventory.Location
-                    FROM Battery
-                    JOIN Inventory 
-                      ON Battery.BatteryID = Inventory.BatteryID
-                    WHERE Battery.BatteryID = :bid
+                    FROM Inventory
+                    WHERE Inventory.BatteryID = :bid
                       AND Inventory.Location NOT IN ('SOLD','SCRAPPED')
+                      AND Inventory.StockType = 'BATTERY'
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $inputId]);
@@ -572,15 +571,14 @@ if ($view === 'scrap') {
             } else {
                 $sql = "
                     SELECT 
-                        Battery.BatteryID,
-                        Battery.Battery,
-                        Battery.DateCode,
+                        Inventory.BatteryID,
+                        Inventory.Battery,
+                        Inventory.DateCode,
                         Inventory.Location
-                    FROM Battery
-                    JOIN Inventory 
-                      ON Battery.BatteryID = Inventory.BatteryID
-                    WHERE Battery.BatteryID = :bid
+                    FROM Inventory
+                    WHERE Inventory.BatteryID = :bid
                       AND Inventory.Location NOT IN ('SOLD','SCRAPPED')
+                      AND Inventory.StockType = 'BATTERY'
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $bid]);
@@ -611,6 +609,7 @@ if ($view === 'scrap') {
                                 SET Location = 'SCRAPPED'
                                 WHERE BatteryID = :bid
                                   AND Location NOT IN ('SOLD','SCRAPPED')
+                                  AND StockType = 'BATTERY'
                             ");
                             $update->execute([':bid' => $bid]);
 
