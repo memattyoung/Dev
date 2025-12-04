@@ -179,7 +179,7 @@ try {
 }
 
 // ===== ROUTING / STATE =====
-// views: menu | inventory | sell | transfer | scrap | stocktruck
+// views: menu | inventory | sell | transfer | scrap | stocktruck | history
 $view = $_GET['view'] ?? 'menu';
 $msg  = $_GET['msg']  ?? '';
 
@@ -191,14 +191,17 @@ $allBatteries   = [];
 $sellError      = "";
 $sellInfo       = null;
 
-$transferError    = "";
-$transferSuccess  = "";
-$transferPreview  = null;
-$transferToLoc    = "";
-$destRows         = [];
+$transferError      = "";
+$transferSuccess    = "";
+$transferPreview    = null;
+$transferToLoc      = "";
+$transferBatteryId  = "";
+$destRows           = [];
 
 $scrapError      = "";
 $scrapInfo       = null;
+
+$historyRows     = [];
 
 $soldTodayCount  = 0;
 
@@ -410,7 +413,8 @@ if ($view === 'transfer') {
         if (isset($_POST['preview_transfer'])) {
             $bid        = trim($_POST['battery_id'] ?? '');
             $transferTo = trim($_POST['to_loc'] ?? '');
-            $transferToLoc = $transferTo;
+            $transferToLoc     = $transferTo;
+            $transferBatteryId = $bid;
 
             if ($bid === '') {
                 $transferError = "Please enter a BatteryID.";
@@ -460,8 +464,9 @@ if ($view === 'transfer') {
             $battery   = trim($_POST['battery'] ?? '');
             $dateCode  = trim($_POST['date_code'] ?? '');
 
-            // Keep selected dest in UI after post
-            $transferToLoc = $toLoc;
+            // keep UI selections
+            $transferToLoc     = $toLoc;
+            $transferBatteryId = $bid;
 
             if ($bid === '' || $fromLoc === '' || $toLoc === '') {
                 $transferError = "Missing transfer data. Please try again.";
@@ -520,8 +525,9 @@ if ($view === 'transfer') {
                         $pdo->commit();
 
                         // Stay on Transfer page and show success
-                        $transferSuccess = "Battery was successfully transferred and logged.";
-                        $transferPreview = null;
+                        $transferSuccess   = "Battery was successfully transferred and logged.";
+                        $transferPreview   = null;
+                        $transferBatteryId = ""; // clear BatteryID prompt after successful transfer
                     }
 
                 } catch (Exception $e) {
@@ -650,6 +656,23 @@ if ($view === 'scrap') {
                 }
             }
         }
+    }
+}
+
+// ===== HISTORY SECTION =====
+if ($view === 'history') {
+    try {
+        $stmtHist = $pdo->prepare("
+            SELECT BatteryID, Battery, Type, ToLoc, FromLoc, LastUpdate
+            FROM AuditLog
+            WHERE EmployeeID = :empId
+            ORDER BY LastUpdate DESC
+            LIMIT 25
+        ");
+        $stmtHist->execute([':empId' => $empAAA]);
+        $historyRows = $stmtHist->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        $historyRows = [];
     }
 }
 
@@ -842,6 +865,7 @@ if ($view === 'menu') {
             <a class="btn" href="?view=stocktruck">Stock Truck</a>
             <a class="btn" href="?view=transfer">Transfer Battery</a>
             <a class="btn" href="?view=scrap">Scrap Battery</a>
+            <a class="btn" href="?view=history">History</a>
         </div>
 
         <div class="card">
@@ -1018,7 +1042,7 @@ if ($view === 'menu') {
                 <div style="display:flex; gap:6px;">
                     <input type="text" name="battery_id" id="transfer_battery_id"
                            style="flex:1;"
-                           value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                           value="<?= htmlspecialchars($transferBatteryId ?? '') ?>"
                            placeholder="Enter or Scan BatteryID">
                     <button type="button"
                             onclick="openScanner('transfer_battery_id')"
@@ -1149,6 +1173,48 @@ if ($view === 'menu') {
                 </p>
             </div>
         <?php endif; ?>
+
+    <?php elseif ($view === 'history'): ?>
+
+        <h2>History</h2>
+
+        <div class="card">
+            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+        </div>
+
+        <div class="card">
+            <p class="small-note">
+                Showing the most recent 25 events for <strong><?= htmlspecialchars($empAAA) ?></strong>.
+            </p>
+            <div class="table-container">
+                <table>
+                    <tr>
+                        <th>BatteryID</th>
+                        <th>Battery</th>
+                        <th>Type</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Time/Date</th>
+                    </tr>
+                    <?php if (empty($historyRows)): ?>
+                        <tr>
+                            <td colspan="6" class="text-center">No history found.</td>
+                        </tr>
+                    <?php else: ?>
+                        <?php foreach ($historyRows as $row): ?>
+                            <tr>
+                                <td><?= htmlspecialchars($row['BatteryID'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['Battery']   ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['Type']      ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['FromLoc']   ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['ToLoc']     ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['LastUpdate'] ?? '') ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </table>
+            </div>
+        </div>
 
     <?php elseif ($view === 'stocktruck'): ?>
 
