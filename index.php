@@ -99,7 +99,7 @@ if (!isset($_SESSION['logged_in'])) {
                         INSERT INTO AuditLog
                             (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType) 
                         VALUES
-                            (:empId, :empName, '', '', '', 'Log On', '', '', '', '', '', 'MOBILE', :lastUpdate, 'BATTERY')
+                            (:empId, :empName, '', '', '', 'Log On', '', '', '', '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY')
                     ");
                     $insertLogin->execute([
                         ':empId'      => $empId,
@@ -204,6 +204,15 @@ $scrapInfo       = null;
 $historyRows     = [];
 
 $soldTodayCount  = 0;
+
+// Stock Truck
+$stockTruckError          = "";
+$stockTruckMessage        = "";
+$stockTruckSelectedTruck  = "";
+$stockTruckSelectedShop   = "";
+$stockTruckRows           = [];
+$stockTruckTruckList      = [];
+$stockTruckShopList       = [];
 
 // ===== INVENTORY SECTION =====
 if ($view === 'inventory') {
@@ -342,7 +351,7 @@ if ($view === 'sell') {
                             INSERT INTO AuditLog
                                 (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType)
                             VALUES
-                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', :lastUpdate, 'BATTERY')
+                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY')
                         ");
                         $insert->execute([
                             ':empId'      => $empAAA,
@@ -509,7 +518,7 @@ if ($view === 'transfer') {
                             INSERT INTO AuditLog
                                 (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType)
                             VALUES
-                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', :fromLoc, 'MOBILE', :lastUpdate, 'BATTERY')
+                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY')
                         ");
                         $insert->execute([
                             ':empId'      => $empAAA,
@@ -629,7 +638,7 @@ if ($view === 'scrap') {
                                 INSERT INTO AuditLog
                                     (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType)
                                 VALUES
-                                    (:empId, :empName, :fromLoc, 'SCRAPPED', :batteryId, 'Scrap', '', :battery, :dateCode, :reason, :fromLoc, 'MOBILE', :lastUpdate, 'BATTERY')
+                                    (:empId, :empName, :fromLoc, 'SCRAPPED', :batteryId, 'Scrap', '', :battery, :dateCode, :reason, 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY')
                             ");
                             $insert->execute([
                                 ':empId'      => $empAAA,
@@ -653,6 +662,159 @@ if ($view === 'scrap') {
                             $scrapInfo  = $row;
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+// ===== STOCK TRUCK SECTION =====
+if ($view === 'stocktruck') {
+    // Load truck list (from Trucks.Truck)
+    $stmtTrucks = $pdo->query("
+        SELECT Truck
+        FROM Trucks
+        WHERE Truck IS NOT NULL AND Truck <> ''
+        ORDER BY Truck
+    ");
+    $stockTruckTruckList = $stmtTrucks->fetchAll(PDO::FETCH_COLUMN);
+
+    // Load shop list (from Location.Location)
+    $stmtShops = $pdo->query("
+        SELECT Location
+        FROM Location
+        WHERE Location IS NOT NULL AND Location <> ''
+        ORDER BY Location
+    ");
+    $stockTruckShopList = $stmtShops->fetchAll(PDO::FETCH_COLUMN);
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $stockTruckSelectedTruck = trim($_POST['truck'] ?? '');
+        $stockTruckSelectedShop  = trim($_POST['shop_loc'] ?? '');
+
+        // Show truck stock
+        if (isset($_POST['show_truck'])) {
+            if ($stockTruckSelectedTruck === '') {
+                $stockTruckError = "Please select a truck.";
+            } else {
+                $sqlTruck = "
+                    SELECT 
+                        Battery,
+                        Current,
+                        Min,
+                        Need
+                    FROM (
+                        SELECT 
+                            bm.Location,
+                            bm.Battery,
+                            COUNT(inv.BatteryID) AS Current,
+                            bm.Minimum AS Min,
+                            (COUNT(inv.BatteryID) - bm.Minimum) * -1 AS Need
+                        FROM BatteryMinimum bm
+                        LEFT JOIN Inventory inv
+                            ON inv.Location = bm.Location
+                            AND inv.Battery = bm.Battery
+                            AND inv.StockType = 'BATTERY'
+                        WHERE bm.Location = :truck
+                        GROUP BY bm.Location, bm.Battery, bm.Minimum
+
+                        UNION ALL
+
+                        SELECT
+                            inv.Location,
+                            inv.Battery,
+                            COUNT(inv.BatteryID) AS Current,
+                            0 AS Min,
+                            COUNT(inv.BatteryID) * -1 AS Need
+                        FROM Inventory inv
+                        LEFT JOIN BatteryMinimum bm
+                            ON bm.Location = inv.Location
+                            AND bm.Battery = inv.Battery
+                        WHERE inv.Location = :truck
+                          AND inv.StockType = 'BATTERY'
+                          AND bm.Battery IS NULL
+                        GROUP BY inv.Location, inv.Battery
+                    ) AS x
+                    WHERE Need <> 0
+                    ORDER BY Battery
+                ";
+                $stmtTruck = $pdo->prepare($sqlTruck);
+                $stmtTruck->execute([':truck' => $stockTruckSelectedTruck]);
+                $stockTruckRows = $stmtTruck->fetchAll(PDO::FETCH_ASSOC);
+            }
+        }
+
+        // Clear truck inventory
+        if (isset($_POST['clear_truck'])) {
+            if ($stockTruckSelectedTruck === '') {
+                $stockTruckError = "Please select a truck before clearing.";
+            } elseif ($stockTruckSelectedShop === '') {
+                $stockTruckError = "Please select a shop to move inventory to.";
+            } else {
+                try {
+                    $pdo->beginTransaction();
+
+                    // Select all battery inventory on that truck
+                    $selInv = $pdo->prepare("
+                        SELECT BatteryID, Battery, DateCode
+                        FROM Inventory
+                        WHERE Location = :truck
+                          AND StockType = 'BATTERY'
+                    ");
+                    $selInv->execute([':truck' => $stockTruckSelectedTruck]);
+                    $truckInvRows = $selInv->fetchAll(PDO::FETCH_ASSOC);
+
+                    if (empty($truckInvRows)) {
+                        $pdo->rollBack();
+                        $stockTruckError = "No battery inventory found on truck " . $stockTruckSelectedTruck . ".";
+                    } else {
+                        // Move inventory to selected shop
+                        $updInv = $pdo->prepare("
+                            UPDATE Inventory
+                            SET Location = :shop
+                            WHERE Location = :truck
+                              AND StockType = 'BATTERY'
+                        ");
+                        $updInv->execute([
+                            ':shop'  => $stockTruckSelectedShop,
+                            ':truck' => $stockTruckSelectedTruck
+                        ]);
+
+                        // Insert one AuditLog record per battery
+                        $insAudit = $pdo->prepare("
+                            INSERT INTO AuditLog
+                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity)
+                            VALUES
+                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'ClearTruck', '', :battery, :dateCode, '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
+                        ");
+
+                        $now = date('Y-m-d H:i:s');
+
+                        foreach ($truckInvRows as $r) {
+                            $insAudit->execute([
+                                ':empId'     => $empAAA,
+                                ':empName'   => $empName,
+                                ':fromLoc'   => $stockTruckSelectedTruck,
+                                ':toLoc'     => $stockTruckSelectedShop,
+                                ':batteryId' => $r['BatteryID'],
+                                ':battery'   => $r['Battery'],
+                                ':dateCode'  => $r['DateCode'],
+                                ':lastUpdate'=> $now,
+                            ]);
+                        }
+
+                        $pdo->commit();
+
+                        $stockTruckMessage = "Truck " . $stockTruckSelectedTruck .
+                            " inventory successfully moved to " . $stockTruckSelectedShop . ".";
+                        $stockTruckRows = []; // truck is now cleared
+                    }
+
+                } catch (Exception $e) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    $stockTruckError = "Error clearing truck: " . $e->getMessage();
                 }
             }
         }
@@ -1182,6 +1344,115 @@ if ($view === 'menu') {
             </div>
         <?php endif; ?>
 
+    <?php elseif ($view === 'stocktruck'): ?>
+
+        <h2>Stock Truck</h2>
+
+        <div class="card">
+            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+        </div>
+
+        <?php if (!empty($stockTruckError)): ?>
+            <div class="card msg msg-error">
+                <?= htmlspecialchars($stockTruckError) ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if (!empty($stockTruckMessage)): ?>
+            <div class="card msg msg-success">
+                <?= htmlspecialchars($stockTruckMessage) ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- Select Truck & Show Stock -->
+        <div class="card">
+            <form method="post">
+                <label class="label-block">Truck</label>
+                <select name="truck">
+                    <option value="">Select Truck</option>
+                    <?php foreach ($stockTruckTruckList as $truck): ?>
+                        <option value="<?= htmlspecialchars($truck) ?>"
+                            <?= ($truck === $stockTruckSelectedTruck ? 'selected' : '') ?>>
+                            <?= htmlspecialchars($truck) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+
+                <button type="submit" name="show_truck" class="btn mt-10">
+                    Show Truck Stock
+                </button>
+            </form>
+            <p class="mt-6 small-note">
+                Shows batteries where current on-truck quantity does not match the defined minimums.
+            </p>
+        </div>
+
+        <!-- Stock Results -->
+        <?php if (!empty($stockTruckRows)): ?>
+            <div class="card">
+                <h3 style="margin-top:0;">Truck Stock for <?= htmlspecialchars($stockTruckSelectedTruck) ?></h3>
+                <div class="table-container">
+                    <table>
+                        <tr>
+                            <th>Battery</th>
+                            <th>Current</th>
+                            <th>Min</th>
+                            <th>Need</th>
+                        </tr>
+                        <?php foreach ($stockTruckRows as $row): ?>
+                            <tr>
+                                <td><?= htmlspecialchars($row['Battery'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['Current'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['Min'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($row['Need'] ?? '') ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </table>
+                </div>
+            </div>
+        <?php endif; ?>
+
+        <!-- Clear Truck -->
+        <?php if (!empty($stockTruckTruckList)): ?>
+            <div class="card">
+                <h3 style="margin-top:0;">Clear Truck Inventory</h3>
+                <form method="post">
+                    <input type="hidden" name="truck" value="<?= htmlspecialchars($stockTruckSelectedTruck) ?>">
+
+                    <label class="label-block">Truck</label>
+                    <select name="truck">
+                        <option value="">Select Truck</option>
+                        <?php foreach ($stockTruckTruckList as $truck): ?>
+                            <option value="<?= htmlspecialchars($truck) ?>"
+                                <?= ($truck === $stockTruckSelectedTruck ? 'selected' : '') ?>>
+                                <?= htmlspecialchars($truck) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+
+                    <label class="label-block mt-10">Move inventory to Shop</label>
+                    <select name="shop_loc">
+                        <option value="">Select Shop Location</option>
+                        <?php foreach ($stockTruckShopList as $shop): ?>
+                            <option value="<?= htmlspecialchars($shop) ?>"
+                                <?= ($shop === $stockTruckSelectedShop ? 'selected' : '') ?>>
+                                <?= htmlspecialchars($shop) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+
+                    <p class="mt-6 small-note" style="color:#b91c1c;">
+                        Warning: Continuing will move <strong>all BATTERY inventory</strong> from the selected truck
+                        to the selected shop location. This action cannot be undone.
+                    </p>
+
+                    <button type="submit" name="clear_truck" class="btn mt-10">
+                        Clear Truck Inventory
+                    </button>
+                </form>
+            </div>
+        <?php endif; ?>
+
     <?php elseif ($view === 'history'): ?>
 
         <h2>History</h2>
@@ -1222,20 +1493,6 @@ if ($view === 'menu') {
                     <?php endif; ?>
                 </table>
             </div>
-        </div>
-
-    <?php elseif ($view === 'stocktruck'): ?>
-
-        <h2>Stock Truck</h2>
-
-        <div class="card">
-            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
-        </div>
-
-        <div class="card">
-            <p class="text-center" style="font-size:14px;">
-                Stock Truck functionality coming soon.
-            </p>
         </div>
 
     <?php else: ?>
