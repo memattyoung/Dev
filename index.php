@@ -191,10 +191,11 @@ $allBatteries   = [];
 $sellError      = "";
 $sellInfo       = null;
 
-$transferError   = "";
-$transferPreview = null;
-$transferToLoc   = "";
-$destRows        = [];
+$transferError    = "";
+$transferSuccess  = "";
+$transferPreview  = null;
+$transferToLoc    = "";
+$destRows         = [];
 
 $scrapError      = "";
 $scrapInfo       = null;
@@ -459,6 +460,9 @@ if ($view === 'transfer') {
             $battery   = trim($_POST['battery'] ?? '');
             $dateCode  = trim($_POST['date_code'] ?? '');
 
+            // Keep selected dest in UI after post
+            $transferToLoc = $toLoc;
+
             if ($bid === '' || $fromLoc === '' || $toLoc === '') {
                 $transferError = "Missing transfer data. Please try again.";
             } elseif ($fromLoc === $toLoc) {
@@ -515,8 +519,9 @@ if ($view === 'transfer') {
 
                         $pdo->commit();
 
-                        header("Location: " . $_SERVER['PHP_SELF'] . "?view=menu&msg=transferred");
-                        exit;
+                        // Stay on Transfer page and show success
+                        $transferSuccess = "Battery was successfully transferred and logged.";
+                        $transferPreview = null;
                     }
 
                 } catch (Exception $e) {
@@ -997,6 +1002,12 @@ if ($view === 'menu') {
         <?php if (!empty($transferError)): ?>
             <div class="card msg msg-error">
                 <?= htmlspecialchars($transferError) ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if (!empty($transferSuccess)): ?>
+            <div class="card msg msg-success">
+                <?= htmlspecialchars($transferSuccess) ?>
             </div>
         <?php endif; ?>
 
