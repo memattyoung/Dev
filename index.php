@@ -222,7 +222,7 @@ if ($view === 'inventory') {
     $selectedLocation = isset($_GET['loc']) ? trim($_GET['loc']) : '';
     $selectedBattery  = isset($_GET['bat']) ? trim($_GET['bat']) : '';
 
-    // Dropdown data (NO SOLD / SCRAPPED) - BatteryInventory
+    // Dropdown data (NO SOLD / SCRAPPED)
     $sqlAll = "
         SELECT 
             BatteryInventory.Battery AS Battery,
@@ -855,8 +855,8 @@ if ($view === 'stocktruck') {
             if ($stockTruckSelectedTruck === '') {
                 $stockTruckError = "Please select a truck before clearing.";
             } else {
-                $stockTruckRows            = $runStockQuery($pdo, $stockTruckSelectedTruck);
-                $stockTruckDidShowQuery    = true;
+                $stockTruckRows             = $runStockQuery($pdo, $stockTruckSelectedTruck);
+                $stockTruckDidShowQuery     = true;
                 $stockTruckShowConfirmClear = true;
             }
         }
@@ -1119,7 +1119,7 @@ if ($view === 'menu') {
         }
         .msg-error {
             background: #fee2e2;
-            color: #991b1b;
+            color:#991b1b;
         }
         .label-block {
             display: block;
