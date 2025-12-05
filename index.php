@@ -222,13 +222,13 @@ if ($view === 'inventory') {
     $selectedLocation = isset($_GET['loc']) ? trim($_GET['loc']) : '';
     $selectedBattery  = isset($_GET['bat']) ? trim($_GET['bat']) : '';
 
-    // Dropdown data (NO SOLD / SCRAPPED)
+    // Dropdown data (NO SOLD / SCRAPPED / ROTATED)
     $sqlAll = "
         SELECT 
             BatteryInventory.Battery AS Battery,
             BatteryInventory.Location AS Location
         FROM BatteryInventory
-        WHERE BatteryInventory.Location NOT IN ('SOLD','SCRAPPED')
+        WHERE BatteryInventory.Location NOT IN ('SOLD','SCRAPPED','ROTATED')
         GROUP BY BatteryInventory.Battery, BatteryInventory.Location
         ORDER BY BatteryInventory.Battery, BatteryInventory.Location
     ";
@@ -244,14 +244,14 @@ if ($view === 'inventory') {
         }
     }
 
-    // Aggregated query (NO SOLD / SCRAPPED)
+    // Aggregated query (NO SOLD / SCRAPPED / ROTATED)
     $sql = "
         SELECT 
             BatteryInventory.Battery AS Battery,
             COUNT(*) AS Quantity,
             BatteryInventory.Location AS Location
         FROM BatteryInventory
-        WHERE BatteryInventory.Location NOT IN ('SOLD','SCRAPPED')
+        WHERE BatteryInventory.Location NOT IN ('SOLD','SCRAPPED','ROTATED')
     ";
     $params = [];
 
@@ -293,14 +293,14 @@ if ($view === 'sell') {
                         BatteryInventory.Location
                     FROM BatteryInventory
                     WHERE BatteryInventory.BatteryID = :bid
-                      AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED')
+                      AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED','ROTATED')
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $inputId]);
                 $sellInfo = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if (!$sellInfo) {
-                    $sellError = "Battery not found, or it is already SOLD/SCRAPPED.";
+                    $sellError = "Battery not found, or it is already SOLD/SCRAPPED/ROTATED.";
                 }
             }
         }
@@ -320,14 +320,14 @@ if ($view === 'sell') {
                         BatteryInventory.Location
                     FROM BatteryInventory
                     WHERE BatteryInventory.BatteryID = :bid
-                      AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED')
+                      AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED','ROTATED')
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $bid]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if (!$row) {
-                    $sellError = "Battery not found, or it is already SOLD/SCRAPPED.";
+                    $sellError = "Battery not found, or it is already SOLD/SCRAPPED/ROTATED.";
                 } else {
                     try {
                         $pdo->beginTransaction();
@@ -340,7 +340,7 @@ if ($view === 'sell') {
                             UPDATE BatteryInventory 
                             SET Location = 'SOLD' 
                             WHERE BatteryID = :bid
-                              AND Location NOT IN ('SOLD','SCRAPPED')
+                              AND Location NOT IN ('SOLD','SCRAPPED','ROTATED')
                         ");
                         $update->execute([':bid' => $bid]);
 
@@ -436,14 +436,14 @@ if ($view === 'transfer') {
                         BatteryInventory.Location
                     FROM BatteryInventory
                     WHERE BatteryInventory.BatteryID = :bid
-                      AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED')
+                      AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED','ROTATED')
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $bid]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if (!$row) {
-                    $transferError = "Battery not found, or it is SOLD/SCRAPPED.";
+                    $transferError = "Battery not found, or it is SOLD/SCRAPPED/ROTATED.";
                 } else {
                     $fromLoc = $row['Location'];
 
@@ -486,14 +486,14 @@ if ($view === 'transfer') {
                         SELECT BatteryInventory.Location
                         FROM BatteryInventory
                         WHERE BatteryID = :bid
-                          AND Location NOT IN ('SOLD','SCRAPPED')
+                          AND Location NOT IN ('SOLD','SCRAPPED','ROTATED')
                     ");
                     $check->execute([':bid' => $bid]);
                     $current = $check->fetch(PDO::FETCH_ASSOC);
 
                     if (!$current || $current['Location'] !== $fromLoc) {
                         $pdo->rollBack();
-                        $transferError = "Battery location changed or is now SOLD/SCRAPPED. Refresh and try again.";
+                        $transferError = "Battery location changed or is now SOLD/SCRAPPED/ROTATED. Refresh and try again.";
                     } else {
                         $now = date('Y-m-d H:i:s');
 
@@ -562,14 +562,14 @@ if ($view === 'scrap') {
                         BatteryInventory.Location
                     FROM BatteryInventory
                     WHERE BatteryInventory.BatteryID = :bid
-                      AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED')
+                      AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED','ROTATED')
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $inputId]);
                 $scrapInfo = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if (!$scrapInfo) {
-                    $scrapError = "Battery not found, or it is already SOLD/SCRAPPED.";
+                    $scrapError = "Battery not found, or it is already SOLD/SCRAPPED/ROTATED.";
                 }
             }
         }
@@ -591,14 +591,14 @@ if ($view === 'scrap') {
                         BatteryInventory.Location
                     FROM BatteryInventory
                     WHERE BatteryInventory.BatteryID = :bid
-                      AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED')
+                      AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED','ROTATED')
                 ";
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([':bid' => $bid]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if (!$row) {
-                    $scrapError = "Battery not found, or it is already SOLD/SCRAPPED.";
+                    $scrapError = "Battery not found, or it is already SOLD/SCRAPPED/ROTATED.";
                 } else {
                     // Validate reason
                     $reasonTrim  = trim($reasonRaw);
@@ -621,7 +621,7 @@ if ($view === 'scrap') {
                                 UPDATE BatteryInventory 
                                 SET Location = 'SCRAPPED'
                                 WHERE BatteryID = :bid
-                                  AND Location NOT IN ('SOLD','SCRAPPED')
+                                  AND Location NOT IN ('SOLD','SCRAPPED','ROTATED')
                             ");
                             $update->execute([':bid' => $bid]);
 
@@ -765,14 +765,14 @@ if ($view === 'stocktruck') {
                             BatteryInventory.Location
                         FROM BatteryInventory
                         WHERE BatteryInventory.BatteryID = :bid
-                          AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED')
+                          AND BatteryInventory.Location NOT IN ('SOLD','SCRAPPED','ROTATED')
                     ";
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute([':bid' => $bid]);
                     $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
                     if (!$row) {
-                        $stockTruckError = "Battery not found, or it is SOLD/SCRAPPED.";
+                        $stockTruckError = "Battery not found, or it is SOLD/SCRAPPED/ROTATED.";
                     } elseif ($row['Location'] === $stockTruckSelectedTruck) {
                         $stockTruckError = "Battery is already on truck " . $stockTruckSelectedTruck . ".";
                     } else {
@@ -788,14 +788,14 @@ if ($view === 'stocktruck') {
                             SELECT Location
                             FROM BatteryInventory
                             WHERE BatteryID = :bid
-                              AND Location NOT IN ('SOLD','SCRAPPED')
+                              AND Location NOT IN ('SOLD','SCRAPPED','ROTATED')
                         ");
                         $check->execute([':bid' => $bid]);
                         $current = $check->fetch(PDO::FETCH_ASSOC);
 
                         if (!$current || $current['Location'] !== $fromLoc) {
                             $pdo->rollBack();
-                            $stockTruckError = "Battery location changed or is now SOLD/SCRAPPED. Refresh and try again.";
+                            $stockTruckError = "Battery location changed or is now SOLD/SCRAPPED/ROTATED. Refresh and try again.";
                         } else {
                             $now = date('Y-m-d H:i:s');
 
