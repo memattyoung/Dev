@@ -349,7 +349,7 @@ if ($view === 'sell') {
                             INSERT INTO AuditLog
                                 (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity)
                             VALUES
-                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'BatterySale', '', :battery, :dateCode, '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
+                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'Battery Sale', '', :battery, :dateCode, '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
                         ");
                         $insert->execute([
                             ':empId'      => $empAAA,
