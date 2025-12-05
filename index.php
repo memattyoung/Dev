@@ -1,9 +1,14 @@
 <?php
 // ===== CONFIG =====
-$dbHost = "browns-test.cr4wimy2q8ur.us-east-2.rds.amazonaws.com";
-$dbName = "Browns";
-$dbUser = "memattyoung";
-$dbPass = "Myoung0996!";
+$dbHost = getenv('BROWNS_DB_HOST');
+$dbName = getenv('BROWNS_DB_NAME');
+$dbUser = getenv('BROWNS_DB_USER');
+$dbPass = getenv('BROWNS_DB_PASS');
+
+// Optional sanity check while we're setting this up:
+if (!$dbHost || !$dbName || !$dbUser || !$dbPass) {
+    die("Database environment variables are not set. Check Render env vars.");
+}
 
 // Force PHP timezone to Eastern (handles EST/EDT automatically)
 date_default_timezone_set('America/New_York');
