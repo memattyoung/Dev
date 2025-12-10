@@ -9,49 +9,46 @@ if (!$dbHost || !$dbName || !$dbUser || !$dbPass) {
     die("Database environment variables are not set. Check Render env vars.");
 }
 
-// Force PHP timezone
+// Timezone
 date_default_timezone_set('America/New_York');
 
-// Start session
+// Session
 session_start();
 
-// ===== SESSION TIMEOUT (5 MINUTES) =====
-$timeoutSeconds = 300;
-if (isset($_SESSION['logged_in'])) {
-    if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > $timeoutSeconds)) {
-        // Session expired
-        $_SESSION = [];
-        if (ini_get("session.use_cookies")) {
-            $params = session_get_cookie_params();
-            setcookie(
-                session_name(),
-                '',
-                time() - 42000,
-                $params["path"],
-                $params["domain"],
-                $params["secure"],
-                $params["httponly"]
-            );
-        }
-        session_destroy();
-        // Send them back to the main login with timeout message
-        header("Location: index.php?msg=timeout");
-        exit;
-    } else {
-        $_SESSION['last_activity'] = time();
-    }
-}
-
-// Must be logged in – redirect to index.php if not
-if (!isset($_SESSION['logged_in'])) {
+// Must be logged in
+if (empty($_SESSION['logged_in'])) {
     header("Location: index.php");
     exit;
 }
 
-// ===== SESSION USER DATA =====
-$empAAA    = $_SESSION['empAAA']  ?? 'WEBUSER';
-$empName   = $_SESSION['empName'] ?? 'Tuna Marie';
-$isManager = !empty($_SESSION['empManager']);
+// Session timeout (5 minutes) – mirror index.php
+$timeoutSeconds = 300;
+if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > $timeoutSeconds)) {
+    $_SESSION = [];
+    if (ini_get("session.use_cookies")) {
+        $params = session_get_cookie_params();
+        setcookie(
+            session_name(),
+            '',
+            time() - 42000,
+            $params["path"],
+            $params["domain"],
+            $params["secure"],
+            $params["httponly"]
+        );
+    }
+    session_destroy();
+    header("Location: index.php?msg=timeout");
+    exit;
+} else {
+    $_SESSION['last_activity'] = time();
+}
+
+// Session vars
+$empAAA         = $_SESSION['empAAA']        ?? 'WEBUSER';
+$empName        = $_SESSION['empName']       ?? 'Tuna Marie';
+$isManager      = !empty($_SESSION['empManager']);
+$isDispatchOnly = !empty($_SESSION['isDispatchOnly'] ?? 0);
 
 // ===== CONNECT TO DB =====
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
@@ -65,12 +62,16 @@ try {
 }
 
 // ===== ROUTING / STATE =====
-// allowed views: inventory | sell | transfer | scrap | stocktruck | history
-$allowedViews = ['inventory','sell','transfer','scrap','stocktruck','history'];
-$view = $_GET['view'] ?? 'inventory';
-if (!in_array($view, $allowedViews, true)) {
+// views: inventory | sell | transfer | scrap | stocktruck | history
+$requestedView = $_GET['view'] ?? 'inventory';
+if ($isDispatchOnly) {
+    // DISPATCH can only see inventory summary
     $view = 'inventory';
+} else {
+    $view = $requestedView;
 }
+
+$msg  = $_GET['msg']  ?? '';
 
 // Predeclare vars
 $invRows        = [];
@@ -249,7 +250,7 @@ if ($view === 'sell') {
 
                         $pdo->commit();
 
-                        // After selling, go back to main menu on index.php with message
+                        // Return to main menu on index with message
                         header("Location: index.php?view=menu&msg=sold");
                         exit;
 
@@ -524,7 +525,6 @@ if ($view === 'scrap') {
 
                             $pdo->commit();
 
-                            // After scrapping, go back to main menu on index.php with message
                             header("Location: index.php?view=menu&msg=scrapped");
                             exit;
 
@@ -837,7 +837,7 @@ if ($view === 'history') {
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Browns Towing Battery Program</title>
+    <title>Browns Towing – Battery Inventory</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {
@@ -852,17 +852,6 @@ if ($view === 'history') {
         .container {
             max-width: 900px;
             margin: 0 auto;
-        }
-        .menu-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        @media (min-width: 600px) {
-            .menu-grid {
-                grid-template-columns: repeat(4, 1fr);
-            }
         }
         .btn {
             display: inline-block;
@@ -921,7 +910,7 @@ if ($view === 'history') {
                 align-items: center;
             }
         }
-        select, input[type="text"], textarea {
+        select, input[type="text"], textarea, input[type="number"] {
             padding: 6px;
             border-radius: 4px;
             border: 1px solid #d1d5db;
@@ -936,6 +925,7 @@ if ($view === 'history') {
             display: flex;
             gap: 6px;
             margin-top: 6px;
+            flex-wrap: wrap;
         }
         .text-center {
             text-align: center;
@@ -965,8 +955,19 @@ if ($view === 'history') {
             font-size: 12px;
             color: #6b7280;
         }
+        .flex-row-between {
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:8px;
+            flex-wrap:wrap;
+        }
         .top-bar-btn {
             max-width:200px;
+        }
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 12px;
         }
     </style>
 </head>
@@ -1014,7 +1015,6 @@ if ($view === 'history') {
                 <div class="filters-actions">
                     <button type="submit" class="btn">Apply Filters</button>
                     <a class="btn btn-secondary" href="battery_inventory.php?view=inventory">Clear</a>
-                    <!-- Removed duplicate "Menu" button here -->
                 </div>
             </form>
         </div>
@@ -1046,7 +1046,15 @@ if ($view === 'history') {
 
         <div class="card">
             <div class="text-center mt-10">
-                <a class="btn btn-secondary top-bar-btn" href="index.php?view=menu">Back to Battery Menu</a>
+                <?php if ($isDispatchOnly): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="index.php?logout=1">
+                        Logout
+                    </a>
+                <?php else: ?>
+                    <a class="btn btn-secondary top-bar-btn" href="index.php?view=menu">
+                        Back to Battery Menu
+                    </a>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -1063,18 +1071,9 @@ if ($view === 'history') {
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
-                <div style="display:flex; gap:6px;">
-                    <input type="text" name="battery_id" id="sell_battery_id"
-                           style="flex:1;"
-                           value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
-                           placeholder="Enter or Scan BatteryID">
-                    <button type="button"
-                            onclick="openScanner('sell_battery_id')"
-                            class="btn"
-                            style="width:auto; padding:0 10px;">
-                        Scan
-                    </button>
-                </div>
+                <input type="text" name="battery_id"
+                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                       placeholder="Enter BatteryID">
                 <button type="submit" name="lookup_battery" class="btn mt-10">
                     Lookup Battery
                 </button>
@@ -1127,18 +1126,9 @@ if ($view === 'history') {
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
-                <div style="display:flex; gap:6px;">
-                    <input type="text" name="battery_id" id="transfer_battery_id"
-                           style="flex:1;"
-                           value="<?= htmlspecialchars($transferBatteryId ?? '') ?>"
-                           placeholder="Enter or Scan BatteryID">
-                    <button type="button"
-                            onclick="openScanner('transfer_battery_id')"
-                            class="btn"
-                            style="width:auto; padding:0 10px;">
-                        Scan
-                    </button>
-                </div>
+                <input type="text" name="battery_id"
+                       value="<?= htmlspecialchars($transferBatteryId ?? '') ?>"
+                       placeholder="Enter BatteryID">
 
                 <label class="label-block mt-10">Transfer To</label>
                 <select name="to_loc">
@@ -1212,18 +1202,9 @@ if ($view === 'history') {
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
-                <div style="display:flex; gap:6px;">
-                    <input type="text" name="battery_id" id="scrap_battery_id"
-                           style="flex:1;"
-                           value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
-                           placeholder="Enter or Scan BatteryID">
-                    <button type="button"
-                            onclick="openScanner('scrap_battery_id')"
-                            class="btn"
-                            style="width:auto; padding:0 10px;">
-                        Scan
-                    </button>
-                </div>
+                <input type="text" name="battery_id"
+                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                       placeholder="Enter BatteryID">
 
                 <button type="submit" name="lookup_battery" class="btn mt-10">
                     Lookup Battery
@@ -1348,18 +1329,9 @@ if ($view === 'history') {
                     <input type="hidden" name="truck" value="<?= htmlspecialchars($stockTruckSelectedTruck) ?>">
 
                     <label class="label-block">BatteryID</label>
-                    <div style="display:flex; gap:6px;">
-                        <input type="text" name="battery_id" id="stocktruck_transfer_battery_id"
-                               style="flex:1;"
-                               value="<?= htmlspecialchars($stockTruckTransferBatteryId ?? '') ?>"
-                               placeholder="Enter or Scan BatteryID">
-                        <button type="button"
-                                onclick="openScanner('stocktruck_transfer_battery_id')"
-                                class="btn"
-                                style="width:auto; padding:0 10px;">
-                            Scan
-                        </button>
-                    </div>
+                    <input type="text" name="battery_id"
+                           value="<?= htmlspecialchars($stockTruckTransferBatteryId ?? '') ?>"
+                           placeholder="Enter BatteryID">
 
                     <button type="submit" name="transfer_to_truck" class="btn mt-10">
                         Transfer Battery to <?= htmlspecialchars($stockTruckSelectedTruck) ?>
@@ -1467,191 +1439,20 @@ if ($view === 'history') {
             </div>
         </div>
 
+    <?php else: ?>
+
+        <h2>Unknown View</h2>
+        <div class="card">
+            <p class="text-center">
+                Something went wrong. Use the menu to go back.
+            </p>
+            <div class="mt-10 text-center">
+                <a class="btn" href="index.php?view=menu">Back to Menu</a>
+            </div>
+        </div>
+
     <?php endif; ?>
 
 </div>
-
-<!-- Barcode Scanner Modal -->
-<div id="scannerOverlay" style="
-    display:none;
-    position:fixed;
-    inset:0;
-    background:rgba(0,0,0,0.8);
-    z-index:9999;
-    align-items:center;
-    justify-content:center;
-">
-    <div style="background:#fff; padding:10px; border-radius:8px; max-width:400px; width:90%; text-align:center;">
-        <h3 style="margin-top:0;">Scan Battery Barcode</h3>
-        <video id="scannerVideo" style="width:100%; max-height:300px; background:#000;"></video>
-        <p style="font-size:12px; color:#6b7280; margin-top:6px;">
-            Align the barcode within the frame until it is detected.
-        </p>
-        <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
-            <button type="button" onclick="switchCamera()" style="
-                padding:8px 12px;
-                border:none;
-                border-radius:6px;
-                background:#2563eb;
-                color:#fff;
-            ">
-                Switch Camera
-            </button>
-            <button type="button" onclick="closeScanner()" style="
-                padding:8px 12px;
-                border:none;
-                border-radius:6px;
-                background:#4b5563;
-                color:#fff;
-            ">
-                Cancel
-            </button>
-        </div>
-    </div>
-</div>
-
-<script src="https://unpkg.com/@zxing/library@latest"></script>
-<script>
-    let selectedInputId = null;
-    let codeReader = null;
-    let videoInputDevices = [];
-    let currentDeviceIndex = 0;
-    let currentStream = null;
-    let audioCtx = null;
-
-    function playBeep() {
-        try {
-            if (!audioCtx) {
-                const AC = window.AudioContext || window.webkitAudioContext;
-                if (!AC) return;
-                audioCtx = new AC();
-            }
-            const duration = 0.15;
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-
-            osc.start();
-            osc.stop(audioCtx.currentTime + duration);
-        } catch (e) {
-            console.warn('Beep failed:', e);
-        }
-    }
-
-    function stopCurrentStream() {
-        const video = document.getElementById('scannerVideo');
-        if (currentStream) {
-            currentStream.getTracks().forEach(t => t.stop());
-            currentStream = null;
-        }
-        if (video) {
-            video.srcObject = null;
-        }
-    }
-
-    async function startDecodingWithCurrentDevice() {
-        if (!videoInputDevices.length) return;
-        const device = videoInputDevices[currentDeviceIndex];
-        const deviceId = device.deviceId;
-
-        stopCurrentStream();
-
-        try {
-            const video = document.getElementById('scannerVideo');
-            codeReader.decodeFromVideoDevice(deviceId, 'scannerVideo', (result, err) => {
-                if (result) {
-                    const input = document.getElementById(selectedInputId);
-                    if (input) {
-                        input.value = result.text;
-                    }
-                    playBeep();
-                    closeScanner();
-                }
-            });
-
-            setTimeout(() => {
-                if (video && video.srcObject) {
-                    currentStream = video.srcObject;
-                }
-            }, 500);
-
-        } catch (e) {
-            console.error('Error starting decode:', e);
-            alert('Unable to start camera. Please check permissions.');
-            closeScanner();
-        }
-    }
-
-    function pickBackCameraIndex(devices) {
-        let idx = devices.findIndex(d =>
-            /back|rear|environment/i.test(d.label)
-        );
-        if (idx !== -1) return idx;
-
-        idx = devices.findIndex(d =>
-            !/front|user/i.test(d.label)
-        );
-        if (idx !== -1) return idx;
-
-        return 0;
-    }
-
-    async function openScanner(inputId) {
-        selectedInputId = inputId;
-        const overlay = document.getElementById('scannerOverlay');
-        overlay.style.display = 'flex';
-
-        if (!codeReader) {
-            codeReader = new ZXing.BrowserMultiFormatReader();
-        }
-
-        try {
-            videoInputDevices = await codeReader.listVideoInputDevices();
-            if (!videoInputDevices.length) {
-                alert('No camera found on this device.');
-                closeScanner();
-                return;
-            }
-
-            currentDeviceIndex = pickBackCameraIndex(videoInputDevices);
-            await startDecodingWithCurrentDevice();
-        } catch (e) {
-            console.error(e);
-            alert('Unable to access camera. Please check permissions.');
-            closeScanner();
-        }
-    }
-
-    function switchCamera() {
-        if (!videoInputDevices.length || !codeReader) return;
-        try {
-            codeReader.reset();
-        } catch (e) {
-            console.warn(e);
-        }
-        stopCurrentStream();
-        currentDeviceIndex = (currentDeviceIndex + 1) % videoInputDevices.length;
-        startDecodingWithCurrentDevice();
-    }
-
-    function closeScanner() {
-        const overlay = document.getElementById('scannerOverlay');
-        overlay.style.display = 'none';
-
-        if (codeReader) {
-            try {
-                codeReader.reset();
-            } catch (e) {
-                console.warn(e);
-            }
-        }
-        stopCurrentStream();
-    }
-</script>
 </body>
 </html>
