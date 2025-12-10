@@ -1169,20 +1169,6 @@ if ($view === 'menu') {
 
         <h2>Main Menu</h2>
 
-        <div class="card">
-            <div class="flex-row-between">
-                <p style="font-size:13px; color:#6b7280; margin:0;">
-                    Logged in as <strong><?= htmlspecialchars($empName) ?></strong>
-                    (<?= htmlspecialchars($empAAA) ?>).
-                </p>
-                <?php if ($isManager): ?>
-                    <a href="?view=manager_home" class="btn btn-secondary top-bar-btn">
-                        Manager Menu
-                    </a>
-                <?php endif; ?>
-            </div>
-        </div>
-
         <div class="menu-grid">
             <a class="btn" href="?view=inventory">Inventory</a>
             <a class="btn" href="?view=sell">Sell Battery</a>
@@ -1200,6 +1186,19 @@ if ($view === 'menu') {
                 </p>
             <?php endif; ?>
 
+            <p class="text-center small-note" style="margin-top:10px;">
+                Logged in as <strong><?= htmlspecialchars($empName) ?></strong>
+                (<?= htmlspecialchars($empAAA) ?>).
+            </p>
+
+            <?php if ($isManager): ?>
+                <div class="text-center mt-10">
+                    <a href="?view=manager_home" class="btn btn-secondary top-bar-btn">
+                        Manager Menu
+                    </a>
+                </div>
+            <?php endif; ?>
+
             <div class="text-center mt-10">
                 <a href="?logout=1" class="btn btn-secondary top-bar-btn">
                     Logout
@@ -1210,11 +1209,6 @@ if ($view === 'menu') {
     <?php elseif ($view === 'inventory'): ?>
 
         <h2>Inventory Summary</h2>
-        <div class="card">
-            <div class="flex-row-between">
-                <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
-            </div>
-        </div>
 
         <div class="card">
             <form method="get">
@@ -1281,15 +1275,15 @@ if ($view === 'menu') {
             </div>
         </div>
 
-    <?php elseif ($view === 'sell'): ?>
-
-        <h2>Sell a Battery</h2>
-
         <div class="card">
-            <div class="flex-row-between">
+            <div class="text-center mt-10">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
             </div>
         </div>
+
+    <?php elseif ($view === 'sell'): ?>
+
+        <h2>Sell a Battery</h2>
 
         <?php if (!empty($sellError)): ?>
             <div class="card msg msg-error">
@@ -1339,15 +1333,15 @@ if ($view === 'menu') {
             </div>
         <?php endif; ?>
 
-    <?php elseif ($view === 'transfer'): ?>
-
-        <h2>Transfer a Battery</h2>
-
         <div class="card">
-            <div class="flex-row-between">
+            <div class="text-center mt-10">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
             </div>
         </div>
+
+    <?php elseif ($view === 'transfer'): ?>
+
+        <h2>Transfer a Battery</h2>
 
         <?php if (!empty($transferError)): ?>
             <div class="card msg msg-error">
@@ -1430,15 +1424,15 @@ if ($view === 'menu') {
             </div>
         <?php endif; ?>
 
-    <?php elseif ($view === 'scrap'): ?>
-
-        <h2>Scrap a Battery</h2>
-
         <div class="card">
-            <div class="flex-row-between">
+            <div class="text-center mt-10">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
             </div>
         </div>
+
+    <?php elseif ($view === 'scrap'): ?>
+
+        <h2>Scrap a Battery</h2>
 
         <?php if (!empty($scrapError)): ?>
             <div class="card msg msg-error">
@@ -1498,15 +1492,15 @@ if ($view === 'menu') {
             </div>
         <?php endif; ?>
 
-    <?php elseif ($view === 'stocktruck'): ?>
-
-        <h2>Stock Truck</h2>
-
         <div class="card">
-            <div class="flex-row-between">
+            <div class="text-center mt-10">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
             </div>
         </div>
+
+    <?php elseif ($view === 'stocktruck'): ?>
+
+        <h2>Stock Truck</h2>
 
         <?php if (!empty($stockTruckError)): ?>
             <div class="card msg msg-error">
@@ -1654,15 +1648,15 @@ if ($view === 'menu') {
             </div>
         <?php endif; ?>
 
-    <?php elseif ($view === 'history'): ?>
-
-        <h2>History</h2>
-
         <div class="card">
-            <div class="flex-row-between">
+            <div class="text-center mt-10">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
             </div>
         </div>
+
+    <?php elseif ($view === 'history'): ?>
+
+        <h2>History</h2>
 
         <div class="card">
             <p class="small-note">
@@ -1695,6 +1689,12 @@ if ($view === 'menu') {
                         <?php endforeach; ?>
                     <?php endif; ?>
                 </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="text-center mt-10">
+                <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
             </div>
         </div>
 
