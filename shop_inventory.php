@@ -42,207 +42,324 @@ try {
 }
 
 /* =========================================================
-   ADD NEW SHOP INVENTORY – STEP-BY-STEP LOGIC
+   DESTINATION LISTS (Location + Trucks)
    ========================================================= */
+$destinationOptions = [];
 
-$addMode            = 'make_model'; // 'make_model' or 'details'
-$addError           = '';
-$addHasDefaults     = false;
-
-$addMake            = '';
-$addModel           = '';
-$addCategory        = '';
-$addDescription     = '';
-$addQuantity        = '';
-$addLocation        = '';
-$addInvoice         = '';
-
-$categoryOptions = [
-    'DRIVER EQUIPMENT',
-    'REPLACEMENT PART',
-    'SHOP EQUIPMENT',
-    'CLEANING SUPPLY',
-    'OFFICE EQUIPMENT',
-    'OTHER'
-];
-
-// For location select: from Location.Location
 try {
-    $locStmt = $pdo->query("
+    // Shop locations
+    $stmtLoc = $pdo->query("
         SELECT Location
         FROM Location
         WHERE Location IS NOT NULL AND Location <> ''
         ORDER BY Location
     ");
-    $locationOptions = $locStmt->fetchAll(PDO::FETCH_COLUMN);
+    $shopLocs = $stmtLoc->fetchAll(PDO::FETCH_COLUMN);
+
+    foreach ($shopLocs as $loc) {
+        $locTrim = trim($loc);
+        if ($locTrim !== '') {
+            $destinationOptions[] = [
+                'value' => $locTrim,
+                'label' => $locTrim . ' (SHOP)'
+            ];
+        }
+    }
+
+    // Trucks
+    $stmtTrk = $pdo->query("
+        SELECT Truck
+        FROM Trucks
+        WHERE Truck IS NOT NULL AND Truck <> ''
+        ORDER BY Truck
+    ");
+    $trucks = $stmtTrk->fetchAll(PDO::FETCH_COLUMN);
+
+    foreach ($trucks as $trk) {
+        $trkTrim = trim($trk);
+        if ($trkTrim !== '') {
+            $destinationOptions[] = [
+                'value' => $trkTrim,
+                'label' => $trkTrim . ' (TRUCK)'
+            ];
+        }
+    }
 } catch (Exception $e) {
-    $locationOptions = [];
+    // If something goes wrong, just leave destinationOptions empty and show error later
 }
 
-// Handle POST for Add workflow
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_action'])) {
-    $action = $_POST['add_action'];
+/* =========================================================
+   ACTION STATE (TRANSFER / CORRECT COUNT)
+   ========================================================= */
+$selectedRow      = null;
+$currentAction    = ''; // 'transfer' or 'correct'
+$actionError      = '';
+$actionSuccess    = '';
 
-    if ($action === 'cancel_add') {
-        // Do nothing – stay in default make/model mode with blank fields
-        $addMode = 'make_model';
-    } elseif ($action === 'start_add') {
-        // STEP 1: Got Make/Model, now look for existing to default Category/Description
-        $addMode = 'details';
+$transferQty      = '';
+$transferTo       = '';
 
-        $addMake  = strtoupper(trim($_POST['add_make']  ?? ''));
-        $addModel = strtoupper(trim($_POST['add_model'] ?? ''));
+$correctNewQty    = '';
+$correctReason    = '';
 
-        if ($addMake === '' || $addModel === '') {
-            $addError = "MAKE and MODEL are required.";
-            $addMode  = 'make_model';
+/**
+ * Load a single ShopInventory row by ID
+ */
+function loadShopInventoryRowById(PDO $pdo, $id) {
+    $stmt = $pdo->prepare("
+        SELECT
+            ID,
+            Make,
+            Model,
+            Category,
+            Description,
+            Quantity,
+            Location,
+            LastUpdate
+        FROM ShopInventory
+        WHERE ID = :id
+    ");
+    $stmt->execute([':id' => $id]);
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+}
+
+/* =========================================================
+   HANDLE POST (SAVE TRANSFER / SAVE CORRECT COUNT)
+   ========================================================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['do_action'])) {
+    $doAction = $_POST['do_action'];
+    $id       = (int)($_POST['record_id'] ?? 0);
+
+    if ($id <= 0) {
+        $actionError = "Invalid record selected.";
+    } else {
+        $row = loadShopInventoryRowById($pdo, $id);
+        if (!$row) {
+            $actionError = "Selected record not found.";
         } else {
-            // Look for existing record (any location) with same MAKE + MODEL to default Category/Description
-            $stmtExisting = $pdo->prepare("
-                SELECT Category, Description
-                FROM ShopInventory
-                WHERE Make = :make
-                  AND Model = :model
-                ORDER BY LastUpdate DESC
-                LIMIT 1
-            ");
-            $stmtExisting->execute([
-                ':make'  => $addMake,
-                ':model' => $addModel,
-            ]);
-            $existing = $stmtExisting->fetch(PDO::FETCH_ASSOC);
+            $selectedRow = $row; // keep context
 
-            if ($existing) {
-                $addHasDefaults = true;
-                $addCategory    = strtoupper(trim($existing['Category'] ?? ''));
-                $addDescription = strtoupper(trim($existing['Description'] ?? ''));
-            } else {
-                $addHasDefaults = false;
-                $addCategory    = '';
-                $addDescription = '';
-            }
-        }
-    } elseif ($action === 'save_add') {
-        // STEP 2: Save final item (insert or update) + write AuditLog
-        $addMode = 'details';
+            if ($doAction === 'transfer_save') {
+                $currentAction = 'transfer';
 
-        // Rehydrate all fields from POST, force UPPERCASE on prompts
-        $addMake        = strtoupper(trim($_POST['add_make']        ?? ''));
-        $addModel       = strtoupper(trim($_POST['add_model']       ?? ''));
-        $addCategory    = strtoupper(trim($_POST['add_category']    ?? ''));
-        $addDescription = strtoupper(trim($_POST['add_description'] ?? ''));
-        $addQuantity    = strtoupper(trim($_POST['add_quantity']    ?? ''));
-        $addLocation    = strtoupper(trim($_POST['add_location']    ?? ''));
-        $addInvoice     = strtoupper(trim($_POST['add_invoice']     ?? ''));
+                $transferQty = trim($_POST['transfer_qty'] ?? '');
+                $transferTo  = trim($_POST['transfer_to'] ?? '');
 
-        // Basic validation
-        if ($addMake === '' || $addModel === '') {
-            $addError = "MAKE and MODEL are required.";
-        } elseif ($addCategory === '') {
-            $addError = "CATEGORY is required.";
-        } elseif ($addDescription === '') {
-            $addError = "DESCRIPTION is required.";
-        } elseif ($addLocation === '') {
-            $addError = "LOCATION is required.";
-        } elseif ($addQuantity === '' || !is_numeric($addQuantity) || (float)$addQuantity <= 0) {
-            $addError = "QUANTITY must be a positive number.";
-        }
-
-        if ($addError === '') {
-            $qtyToAdd = (float)$addQuantity;
-
-            try {
-                $pdo->beginTransaction();
-
-                // Does this MAKE+MODEL already exist in this LOCATION?
-                $stmtFind = $pdo->prepare("
-                    SELECT ID, Quantity
-                    FROM ShopInventory
-                    WHERE Make = :make
-                      AND Model = :model
-                      AND Location = :loc
-                    LIMIT 1
-                ");
-                $stmtFind->execute([
-                    ':make' => $addMake,
-                    ':model'=> $addModel,
-                    ':loc'  => $addLocation,
-                ]);
-                $existingRow = $stmtFind->fetch(PDO::FETCH_ASSOC);
-
-                $now = date('Y-m-d H:i:s');
-                $finalQty = $qtyToAdd;
-
-                if ($existingRow) {
-                    // Update existing: add quantity to previous record
-                    $newQty = (float)($existingRow['Quantity'] ?? 0) + $qtyToAdd;
-                    $finalQty = $newQty;
-
-                    $stmtUpdate = $pdo->prepare("
-                        UPDATE ShopInventory
-                        SET Category = :cat,
-                            Description = :descr,
-                            Quantity = :qty,
-                            LastUpdate = :lu
-                        WHERE ID = :id
-                    ");
-                    $stmtUpdate->execute([
-                        ':cat'   => $addCategory,
-                        ':descr' => $addDescription,
-                        ':qty'   => $newQty,
-                        ':lu'    => $now,
-                        ':id'    => $existingRow['ID'],
-                    ]);
+                if ($transferQty === '' || !is_numeric($transferQty) || (float)$transferQty <= 0) {
+                    $actionError = "Transfer quantity must be a positive number.";
+                } elseif ($transferTo === '') {
+                    $actionError = "Destination location is required.";
                 } else {
-                    // Insert new record
-                    $stmtInsert = $pdo->prepare("
-                        INSERT INTO ShopInventory
-                            (Make, Model, Category, Description, Quantity, Location, LastUpdate)
-                        VALUES
-                            (:make, :model, :cat, :descr, :qty, :loc, :lu)
-                    ");
-                    $stmtInsert->execute([
-                        ':make'  => $addMake,
-                        ':model' => $addModel,
-                        ':cat'   => $addCategory,
-                        ':descr' => $addDescription,
-                        ':qty'   => $qtyToAdd,
-                        ':loc'   => $addLocation,
-                        ':lu'    => $now,
-                    ]);
+                    $qtyMove = (float)$transferQty;
+                    $currentQty = (float)($row['Quantity'] ?? 0);
+
+                    if ($qtyMove > $currentQty) {
+                        $actionError = "Cannot transfer more than current quantity. Current = {$currentQty}.";
+                    } elseif (strcasecmp($transferTo, $row['Location']) === 0) {
+                        $actionError = "Destination cannot be the same as the current location.";
+                    } else {
+                        try {
+                            $pdo->beginTransaction();
+
+                            $now       = date('Y-m-d H:i:s');
+                            $fromLoc   = $row['Location'];
+                            $make      = $row['Make'];
+                            $model     = $row['Model'];
+                            $descr     = $row['Description'];
+                            $category  = $row['Category'];
+
+                            // 1) Update source row quantity
+                            $newSourceQty = $currentQty - $qtyMove;
+                            $stmtUpdSrc = $pdo->prepare("
+                                UPDATE ShopInventory
+                                SET Quantity = :qty, LastUpdate = :lu
+                                WHERE ID = :id
+                            ");
+                            $stmtUpdSrc->execute([
+                                ':qty' => $newSourceQty,
+                                ':lu'  => $now,
+                                ':id'  => $row['ID'],
+                            ]);
+
+                            // 2) Update or insert destination row
+                            $stmtFindDest = $pdo->prepare("
+                                SELECT ID, Quantity
+                                FROM ShopInventory
+                                WHERE Make = :make
+                                  AND Model = :model
+                                  AND Location = :loc
+                                LIMIT 1
+                            ");
+                            $stmtFindDest->execute([
+                                ':make' => $make,
+                                ':model'=> $model,
+                                ':loc'  => $transferTo,
+                            ]);
+                            $destRow = $stmtFindDest->fetch(PDO::FETCH_ASSOC);
+
+                            if ($destRow) {
+                                $destQtyNew = (float)$destRow['Quantity'] + $qtyMove;
+                                $stmtUpdDst = $pdo->prepare("
+                                    UPDATE ShopInventory
+                                    SET Quantity = :qty, LastUpdate = :lu
+                                    WHERE ID = :id
+                                ");
+                                $stmtUpdDst->execute([
+                                    ':qty' => $destQtyNew,
+                                    ':lu'  => $now,
+                                    ':id'  => $destRow['ID'],
+                                ]);
+                            } else {
+                                $stmtInsDst = $pdo->prepare("
+                                    INSERT INTO ShopInventory
+                                        (Make, Model, Category, Description, Quantity, Location, LastUpdate)
+                                    VALUES
+                                        (:make, :model, :cat, :descr, :qty, :loc, :lu)
+                                ");
+                                $stmtInsDst->execute([
+                                    ':make'  => $make,
+                                    ':model' => $model,
+                                    ':cat'   => $category,
+                                    ':descr' => $descr,
+                                    ':qty'   => $qtyMove,
+                                    ':loc'   => $transferTo,
+                                    ':lu'    => $now,
+                                ]);
+                            }
+
+                            // 3) AuditLog insert
+                            // EmployeeID, Employee, FromLoc, ToLoc, Type='Stock Transfer',
+                            // Location='MOBILE', Computer='MOBILE',
+                            // Make, Model, StockType='STOCK', Quantity=<qtyMove>, Description, LastUpdate
+                            $stmtAudit = $pdo->prepare("
+                                INSERT INTO AuditLog
+                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity, Make, Model, Description)
+                                VALUES
+                                    (:empId, :empName, :fromLoc, :toLoc, '', 'Stock Transfer', '', '', '', '', 'MOBILE', 'MOBILE', :lastUpdate, 'STOCK', :qty, :make, :model, :descr)
+                            ");
+                            $stmtAudit->execute([
+                                ':empId'      => $empAAA,
+                                ':empName'    => $empName,
+                                ':fromLoc'    => $fromLoc,
+                                ':toLoc'      => $transferTo,
+                                ':lastUpdate' => $now,
+                                ':qty'        => $qtyMove,
+                                ':make'       => $make,
+                                ':model'      => $model,
+                                ':descr'      => $descr,
+                            ]);
+
+                            $pdo->commit();
+
+                            $actionSuccess = "Stock was successfully transferred.";
+                            // Clear form state
+                            $currentAction = '';
+                            $selectedRow   = null;
+                            $transferQty   = '';
+                            $transferTo    = '';
+
+                        } catch (Exception $e) {
+                            if ($pdo->inTransaction()) {
+                                $pdo->rollBack();
+                            }
+                            $actionError = "Error performing stock transfer: " . htmlspecialchars($e->getMessage());
+                        }
+                    }
                 }
 
-                // Write AuditLog record
-                $stmtAudit = $pdo->prepare("
-                    INSERT INTO AuditLog
-                        (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity, Make, Model, Description)
-                    VALUES
-                        (:empId, :empName, '', :toLoc, '', 'ADD TO STOCK', :invoice, '', '', '', 'MOBILE', 'MOBILE', :lastUpdate, 'Battery', :qty, :make, :model, :descr)
-                ");
-                $stmtAudit->execute([
-                    ':empId'      => $empAAA,
-                    ':empName'    => $empName,
-                    ':toLoc'      => $addLocation,
-                    ':invoice'    => $addInvoice,
-                    ':lastUpdate' => $now,
-                    ':qty'        => $finalQty,
-                    ':make'       => $addMake,
-                    ':model'      => $addModel,
-                    ':descr'      => $addDescription,
-                ]);
+            } elseif ($doAction === 'correct_save') {
+                $currentAction = 'correct';
 
-                $pdo->commit();
+                $correctNewQty = trim($_POST['correct_qty'] ?? '');
+                $correctReason = trim($_POST['correct_reason'] ?? '');
 
-                // After success, redirect to clear POST and show updated table
-                header("Location: shop_inventory.php?added=1");
-                exit;
+                if ($correctNewQty === '' || !is_numeric($correctNewQty) || (float)$correctNewQty < 0) {
+                    $actionError = "New count must be a number greater than or equal to zero.";
+                } else {
+                    $newQty     = (float)$correctNewQty;
+                    $currentQty = (float)$row['Quantity'];
 
-            } catch (Exception $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
+                    if ($newQty == $currentQty) {
+                        $actionError = "New count matches the current quantity. No changes to save.";
+                    } else {
+                        // Reason limited to 255 chars
+                        $reasonClean = mb_substr($correctReason, 0, 255);
+
+                        try {
+                            $pdo->beginTransaction();
+
+                            $now      = date('Y-m-d H:i:s');
+                            $loc      = $row['Location'];
+                            $make     = $row['Make'];
+                            $model    = $row['Model'];
+                            $descr    = $row['Description'];
+
+                            // 1) Update ShopInventory
+                            $stmtUpd = $pdo->prepare("
+                                UPDATE ShopInventory
+                                SET Quantity = :qty, LastUpdate = :lu
+                                WHERE ID = :id
+                            ");
+                            $stmtUpd->execute([
+                                ':qty' => $newQty,
+                                ':lu'  => $now,
+                                ':id'  => $row['ID'],
+                            ]);
+
+                            // 2) AuditLog insert
+                            // Same Type = 'Stock Transfer' per spec
+                            $stmtAudit = $pdo->prepare("
+                                INSERT INTO AuditLog
+                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity, Make, Model, Description)
+                                VALUES
+                                    (:empId, :empName, :fromLoc, :toLoc, '', 'Stock Transfer', '', '', '', :reason, 'MOBILE', 'MOBILE', :lastUpdate, 'STOCK', :qty, :make, :model, :descr)
+                            ");
+                            $stmtAudit->execute([
+                                ':empId'      => $empAAA,
+                                ':empName'    => $empName,
+                                ':fromLoc'    => $loc,
+                                ':toLoc'      => $loc,
+                                ':reason'     => $reasonClean,
+                                ':lastUpdate' => $now,
+                                ':qty'        => $newQty,
+                                ':make'       => $make,
+                                ':model'      => $model,
+                                ':descr'      => $descr,
+                            ]);
+
+                            $pdo->commit();
+
+                            $actionSuccess = "Count was successfully corrected.";
+                            $currentAction = '';
+                            $selectedRow   = null;
+                            $correctNewQty = '';
+                            $correctReason = '';
+
+                        } catch (Exception $e) {
+                            if ($pdo->inTransaction()) {
+                                $pdo->rollBack();
+                            }
+                            $actionError = "Error correcting count: " . htmlspecialchars($e->getMessage());
+                        }
+                    }
                 }
-                $addError = "Error adding to stock: " . htmlspecialchars($e->getMessage());
             }
+        }
+    }
+}
+
+/* =========================================================
+   HANDLE GET TO OPEN ACTION FOR A ROW
+   ========================================================= */
+if ($selectedRow === null && isset($_GET['id'], $_GET['act'])) {
+    $id  = (int)$_GET['id'];
+    $act = $_GET['act'];
+
+    if ($id > 0 && in_array($act, ['transfer', 'correct'], true)) {
+        $row = loadShopInventoryRowById($pdo, $id);
+        if ($row) {
+            $selectedRow   = $row;
+            $currentAction = $act;
         }
     }
 }
@@ -348,6 +465,10 @@ $distinctCats   = $pdo->query("SELECT DISTINCT Category FROM ShopInventory ORDER
         .btn:active {
             transform: scale(0.98);
         }
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 12px;
+        }
         .table-container {
             max-height: 65vh;
             overflow-y: auto;
@@ -374,10 +495,6 @@ $distinctCats   = $pdo->query("SELECT DISTINCT Category FROM ShopInventory ORDER
             border: 1px solid #d1d5db;
             width: 100%;
             box-sizing: border-box;
-        }
-        /* Make prompts visually UPPERCASE */
-        .uppercase-input {
-            text-transform: uppercase;
         }
         .filter-row {
             display: grid;
@@ -436,148 +553,107 @@ $distinctCats   = $pdo->query("SELECT DISTINCT Category FROM ShopInventory ORDER
         </div>
     </div>
 
-    <?php if (isset($_GET['added']) && $_GET['added'] == '1'): ?>
-        <div class="card msg msg-success">
-            Shop inventory was successfully updated.
+    <?php if ($actionError !== ''): ?>
+        <div class="card msg msg-error">
+            <?= htmlspecialchars($actionError) ?>
         </div>
     <?php endif; ?>
 
-    <!-- ADD SHOP INVENTORY CARD -->
-    <div class="card">
-        <h2 style="margin-top:0; font-size:18px;">Add to Shop Inventory</h2>
+    <?php if ($actionSuccess !== ''): ?>
+        <div class="card msg msg-success">
+            <?= htmlspecialchars($actionSuccess) ?>
+        </div>
+    <?php endif; ?>
 
-        <?php if ($addError !== ''): ?>
-            <div class="msg msg-error">
-                <?= htmlspecialchars($addError) ?>
-            </div>
-        <?php endif; ?>
-
-        <?php if ($addMode === 'make_model'): ?>
-            <!-- STEP 1: Prompt for MAKE + MODEL -->
+    <?php if ($selectedRow && $currentAction === 'transfer'): ?>
+        <div class="card">
+            <h2 style="margin-top:0; font-size:18px;">Transfer Stock</h2>
+            <p class="small-note">
+                Make: <strong><?= htmlspecialchars($selectedRow['Make']) ?></strong>,
+                Model: <strong><?= htmlspecialchars($selectedRow['Model']) ?></strong>,
+                Location: <strong><?= htmlspecialchars($selectedRow['Location']) ?></strong>,
+                Current Qty: <strong><?= htmlspecialchars($selectedRow['Quantity']) ?></strong>
+            </p>
             <form method="post">
-                <input type="hidden" name="add_action" value="start_add">
-                <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:8px;">
-                    <div>
-                        <label class="label-block">MAKE</label>
-                        <input type="text"
-                               name="add_make"
-                               class="uppercase-input"
-                               value="<?= htmlspecialchars($addMake) ?>">
-                    </div>
-                    <div>
-                        <label class="label-block">MODEL</label>
-                        <input type="text"
-                               name="add_model"
-                               class="uppercase-input"
-                               value="<?= htmlspecialchars($addModel) ?>">
-                    </div>
-                </div>
-                <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-                    <button type="submit" class="btn">Next</button>
-                    <button type="submit" name="add_action" value="cancel_add" class="btn btn-secondary">
-                        Cancel
-                    </button>
-                </div>
-                <p class="small-note" style="margin-top:8px;">
-                    First, enter MAKE and MODEL. If this combination already exists, Category and Description will be defaulted on the next step.
-                </p>
-            </form>
-        <?php else: ?>
-            <!-- STEP 2: Details (CATEGORY, DESCRIPTION, QUANTITY, LOCATION, INVOICE) -->
-            <form method="post">
-                <input type="hidden" name="add_action" value="save_add">
-                <!-- keep MAKE/MODEL across post -->
-                <input type="hidden" name="add_make"  value="<?= htmlspecialchars($addMake) ?>">
-                <input type="hidden" name="add_model" value="<?= htmlspecialchars($addModel) ?>">
+                <input type="hidden" name="do_action" value="transfer_save">
+                <input type="hidden" name="record_id" value="<?= (int)$selectedRow['ID'] ?>">
 
                 <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:8px;">
                     <div>
-                        <label class="label-block">MAKE</label>
-                        <input type="text"
-                               class="uppercase-input"
-                               value="<?= htmlspecialchars($addMake) ?>"
-                               readonly>
-                    </div>
-                    <div>
-                        <label class="label-block">MODEL</label>
-                        <input type="text"
-                               class="uppercase-input"
-                               value="<?= htmlspecialchars($addModel) ?>"
-                               readonly>
-                    </div>
-                </div>
-
-                <div style="margin-top:8px; display:grid; grid-template-columns: repeat(2, 1fr); gap:8px;">
-                    <div>
-                        <label class="label-block">CATEGORY</label>
-                        <select name="add_category" class="uppercase-input">
-                            <option value="">-- SELECT CATEGORY --</option>
-                            <?php foreach ($categoryOptions as $catOpt): ?>
-                                <option value="<?= htmlspecialchars($catOpt) ?>"
-                                    <?= ($catOpt === $addCategory ? 'selected' : '') ?>>
-                                    <?= htmlspecialchars($catOpt) ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="label-block">LOCATION</label>
-                        <select name="add_location" class="uppercase-input">
-                            <option value="">-- SELECT LOCATION --</option>
-                            <?php foreach ($locationOptions as $loc): ?>
-                                <?php $locUpper = strtoupper($loc); ?>
-                                <option value="<?= htmlspecialchars($locUpper) ?>"
-                                    <?= ($locUpper === $addLocation ? 'selected' : '') ?>>
-                                    <?= htmlspecialchars($locUpper) ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                </div>
-
-                <div style="margin-top:8px;">
-                    <label class="label-block">DESCRIPTION</label>
-                    <textarea name="add_description"
-                              class="uppercase-input"
-                              rows="2"><?= htmlspecialchars($addDescription) ?></textarea>
-                </div>
-
-                <div style="margin-top:8px; display:grid; grid-template-columns: repeat(2, 1fr); gap:8px;">
-                    <div>
-                        <label class="label-block">QUANTITY</label>
+                        <label class="label-block">Quantity to Transfer</label>
                         <input type="number"
-                               step="1"
+                               name="transfer_qty"
                                min="1"
-                               name="add_quantity"
-                               class="uppercase-input"
-                               value="<?= htmlspecialchars($addQuantity) ?>">
+                               step="1"
+                               value="<?= htmlspecialchars($transferQty) ?>">
                     </div>
                     <div>
-                        <label class="label-block">INVOICE (optional)</label>
-                        <input type="text"
-                               name="add_invoice"
-                               class="uppercase-input"
-                               value="<?= htmlspecialchars($addInvoice) ?>">
+                        <label class="label-block">Transfer To Location</label>
+                        <select name="transfer_to">
+                            <option value="">Select Destination</option>
+                            <?php foreach ($destinationOptions as $opt): ?>
+                                <option value="<?= htmlspecialchars($opt['value']) ?>"
+                                    <?= ($opt['value'] === $transferTo ? 'selected' : '') ?>>
+                                    <?= htmlspecialchars($opt['label']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
                     </div>
                 </div>
 
                 <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-                    <button type="submit" class="btn">Save</button>
-                    <button type="submit" name="add_action" value="cancel_add" class="btn btn-secondary">
-                        Cancel
-                    </button>
+                    <button type="submit" class="btn">Save Transfer</button>
+                    <a href="shop_inventory.php" class="btn btn-secondary">Cancel</a>
                 </div>
 
                 <p class="small-note" style="margin-top:8px;">
-                    All entries are stored in UPPERCASE. If MAKE/MODEL already exist in the selected LOCATION,
-                    the quantity will be added to the existing record; otherwise a new record will be created.
-                    An audit log record (ADD TO STOCK) will also be written.
+                    Transfer will subtract from the current location and add to the destination.
+                    Quantity cannot go negative.
                 </p>
             </form>
-        <?php endif; ?>
-    </div>
+        </div>
+    <?php elseif ($selectedRow && $currentAction === 'correct'): ?>
+        <div class="card">
+            <h2 style="margin-top:0; font-size:18px;">Correct Count</h2>
+            <p class="small-note">
+                Make: <strong><?= htmlspecialchars($selectedRow['Make']) ?></strong>,
+                Model: <strong><?= htmlspecialchars($selectedRow['Model']) ?></strong>,
+                Location: <strong><?= htmlspecialchars($selectedRow['Location']) ?></strong>,
+                Current Qty: <strong><?= htmlspecialchars($selectedRow['Quantity']) ?></strong>
+            </p>
+            <form method="post">
+                <input type="hidden" name="do_action" value="correct_save">
+                <input type="hidden" name="record_id" value="<?= (int)$selectedRow['ID'] ?>">
 
-    <!-- EXISTING FILTER CARD -->
+                <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:8px;">
+                    <div>
+                        <label class="label-block">New Count</label>
+                        <input type="number"
+                               name="correct_qty"
+                               min="0"
+                               step="1"
+                               value="<?= htmlspecialchars($correctNewQty) ?>">
+                    </div>
+                    <div>
+                        <label class="label-block">Reason (max 255 chars)</label>
+                        <textarea name="correct_reason"
+                                  rows="2"
+                                  maxlength="255"><?= htmlspecialchars($correctReason) ?></textarea>
+                    </div>
+                </div>
+
+                <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+                    <button type="submit" class="btn">Save Correction</button>
+                    <a href="shop_inventory.php" class="btn btn-secondary">Cancel</a>
+                </div>
+
+                <p class="small-note" style="margin-top:8px;">
+                    Reason is required and stored in the audit log. Quantity cannot be negative.
+                </p>
+            </form>
+        </div>
+    <?php endif; ?>
+
     <div class="card">
         <form method="get">
             <div class="filter-row">
@@ -640,7 +716,7 @@ $distinctCats   = $pdo->query("SELECT DISTINCT Category FROM ShopInventory ORDER
             </div>
         </form>
         <p class="small-note" style="margin-top:8px;">
-            This view shows current shop equipment, parts, and supplies.
+            Select a row below to transfer stock or correct the count.
         </p>
     </div>
 
@@ -656,10 +732,11 @@ $distinctCats   = $pdo->query("SELECT DISTINCT Category FROM ShopInventory ORDER
                     <th>Qty</th>
                     <th>Location</th>
                     <th>Last Updated</th>
+                    <th>Actions</th>
                 </tr>
                 <?php if (empty($rows)): ?>
                     <tr>
-                        <td colspan="8" style="text-align:center;">No records found.</td>
+                        <td colspan="9" style="text-align:center;">No records found.</td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($rows as $r): ?>
@@ -672,6 +749,29 @@ $distinctCats   = $pdo->query("SELECT DISTINCT Category FROM ShopInventory ORDER
                             <td><?= htmlspecialchars($r['Quantity']) ?></td>
                             <td><?= htmlspecialchars($r['Location']) ?></td>
                             <td><?= htmlspecialchars($r['LastUpdate']) ?></td>
+                            <td>
+                                <!-- Transfer button -->
+                                <form method="get" style="display:inline;">
+                                    <input type="hidden" name="id" value="<?= (int)$r['ID'] ?>">
+                                    <input type="hidden" name="act" value="transfer">
+                                    <!-- Preserve filters -->
+                                    <input type="hidden" name="make" value="<?= htmlspecialchars($filterMake) ?>">
+                                    <input type="hidden" name="model" value="<?= htmlspecialchars($filterModel) ?>">
+                                    <input type="hidden" name="loc" value="<?= htmlspecialchars($filterLoc) ?>">
+                                    <input type="hidden" name="cat" value="<?= htmlspecialchars($filterCategory) ?>">
+                                    <button type="submit" class="btn btn-small">Transfer</button>
+                                </form>
+                                <!-- Correct Count button -->
+                                <form method="get" style="display:inline; margin-left:4px;">
+                                    <input type="hidden" name="id" value="<?= (int)$r['ID'] ?>">
+                                    <input type="hidden" name="act" value="correct">
+                                    <input type="hidden" name="make" value="<?= htmlspecialchars($filterMake) ?>">
+                                    <input type="hidden" name="model" value="<?= htmlspecialchars($filterModel) ?>">
+                                    <input type="hidden" name="loc" value="<?= htmlspecialchars($filterLoc) ?>">
+                                    <input type="hidden" name="cat" value="<?= htmlspecialchars($filterCategory) ?>">
+                                    <button type="submit" class="btn btn-small btn-secondary">Correct</button>
+                                </form>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>
