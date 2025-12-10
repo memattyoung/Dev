@@ -1213,9 +1213,6 @@ if ($view === 'menu') {
         <div class="card">
             <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
-                <?php if ($isManager): ?>
-                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
-                <?php endif; ?>
             </div>
         </div>
 
@@ -1291,9 +1288,6 @@ if ($view === 'menu') {
         <div class="card">
             <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
-                <?php if ($isManager): ?>
-                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
-                <?php endif; ?>
             </div>
         </div>
 
@@ -1352,9 +1346,6 @@ if ($view === 'menu') {
         <div class="card">
             <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
-                <?php if ($isManager): ?>
-                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
-                <?php endif; ?>
             </div>
         </div>
 
@@ -1446,9 +1437,6 @@ if ($view === 'menu') {
         <div class="card">
             <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
-                <?php if ($isManager): ?>
-                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
-                <?php endif; ?>
             </div>
         </div>
 
@@ -1517,9 +1505,6 @@ if ($view === 'menu') {
         <div class="card">
             <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
-                <?php if ($isManager): ?>
-                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
-                <?php endif; ?>
             </div>
         </div>
 
@@ -1676,9 +1661,6 @@ if ($view === 'menu') {
         <div class="card">
             <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
-                <?php if ($isManager): ?>
-                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
-                <?php endif; ?>
             </div>
         </div>
 
