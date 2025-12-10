@@ -69,7 +69,7 @@ if (!isset($_SESSION['logged_in'])) {
     $error = "";
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        // Force AAA to uppercase so DISPATCH matches regardless of how they type it
+        // Force AAA to uppercase so DISPATCH matches regardless of casing
         $aaaInput = trim($_POST['aaa'] ?? '');
         $aaa      = strtoupper($aaaInput);
         $pwd      = trim($_POST['password'] ?? '');
@@ -118,14 +118,12 @@ if (!isset($_SESSION['logged_in'])) {
                     ]);
 
                     // Set session
-                    $_SESSION['logged_in']     = true;
-                    $_SESSION['empAAA']        = $empId;
-                    $_SESSION['empFirst']      = $emp['FirstName'];
-                    $_SESSION['empLast']       = $emp['LastName'];
-                    $_SESSION['empName']       = $empName;
-                    // Manager flag (assuming 1 = manager, 0 = not)
-                    $_SESSION['empManager']    = (int)($emp['Manager'] ?? 0);
-                    // Dispatch-only user flag
+                    $_SESSION['logged_in']      = true;
+                    $_SESSION['empAAA']         = $empId;
+                    $_SESSION['empFirst']       = $emp['FirstName'];
+                    $_SESSION['empLast']        = $emp['LastName'];
+                    $_SESSION['empName']        = $empName;
+                    $_SESSION['empManager']     = (int)($emp['Manager'] ?? 0);   // Manager flag
                     $_SESSION['isDispatchOnly'] = (strtoupper($empId) === 'DISPATCH');
                     $_SESSION['last_activity']  = time(); // start timeout timer
 
@@ -197,9 +195,21 @@ if ($isDispatchOnly) {
 }
 
 // ===== ROUTING / STATE (for non-dispatch users) =====
-// views: manager_home | menu
 $view = $_GET['view'] ?? ($isManager ? 'manager_home' : 'menu');
 $msg  = $_GET['msg']  ?? '';
+
+// Old battery views that used to live on index.php -> redirect to battery_inventory.php
+$legacyBatteryViews = ['inventory', 'sell', 'transfer', 'scrap', 'stocktruck', 'history'];
+if (in_array($view, $legacyBatteryViews, true)) {
+    // Preserve view only; params like loc/bat are already on query string when coming from battery pages
+    header("Location: battery_inventory.php?view=" . urlencode($view));
+    exit;
+}
+
+// Any unknown view just falls back to menu
+if ($view !== 'manager_home' && $view !== 'menu') {
+    $view = 'menu';
+}
 
 ?>
 <!doctype html>
@@ -284,10 +294,6 @@ $msg  = $_GET['msg']  ?? '';
 
     <h1>Browns Towing Battery Program</h1>
 
-    <?php if ($msg === 'something'): ?>
-        <!-- placeholder for any future messages -->
-    <?php endif; ?>
-
     <?php if ($view === 'manager_home'): ?>
 
         <h2>Manager Menu</h2>
@@ -335,18 +341,6 @@ $msg  = $_GET['msg']  ?? '';
                 <a href="?logout=1" class="btn btn-secondary top-bar-btn">
                     Logout
                 </a>
-            </div>
-        </div>
-
-    <?php else: ?>
-
-        <h2>Unknown View</h2>
-        <div class="card">
-            <p class="text-center">
-                Something went wrong. Use the menu to go back.
-            </p>
-            <div class="mt-10 text-center">
-                <a class="btn" href="?view=menu">Back to Menu</a>
             </div>
         </div>
 
