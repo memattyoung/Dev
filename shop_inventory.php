@@ -85,7 +85,7 @@ try {
         }
     }
 } catch (Exception $e) {
-    // If something goes wrong, just leave destinationOptions empty and show error later
+    // silently ignore, just no destinations
 }
 
 /* =========================================================
@@ -150,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['do_action'])) {
                 } elseif ($transferTo === '') {
                     $actionError = "Destination location is required.";
                 } else {
-                    $qtyMove = (float)$transferQty;
+                    $qtyMove    = (float)$transferQty;
                     $currentQty = (float)($row['Quantity'] ?? 0);
 
                     if ($qtyMove > $currentQty) {
@@ -228,9 +228,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['do_action'])) {
                             }
 
                             // 3) AuditLog insert
-                            // EmployeeID, Employee, FromLoc, ToLoc, Type='Stock Transfer',
-                            // Location='MOBILE', Computer='MOBILE',
-                            // Make, Model, StockType='STOCK', Quantity=<qtyMove>, Description, LastUpdate
                             $stmtAudit = $pdo->prepare("
                                 INSERT INTO AuditLog
                                     (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity, Make, Model, Description)
@@ -252,7 +249,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['do_action'])) {
                             $pdo->commit();
 
                             $actionSuccess = "Stock was successfully transferred.";
-                            // Clear form state
+                            // After submit, hide area
                             $currentAction = '';
                             $selectedRow   = null;
                             $transferQty   = '';
@@ -275,6 +272,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['do_action'])) {
 
                 if ($correctNewQty === '' || !is_numeric($correctNewQty) || (float)$correctNewQty < 0) {
                     $actionError = "New count must be a number greater than or equal to zero.";
+                } elseif ($correctReason === '') {
+                    // Reason required
+                    $actionError = "Reason is required.";
                 } else {
                     $newQty     = (float)$correctNewQty;
                     $currentQty = (float)$row['Quantity'];
@@ -307,7 +307,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['do_action'])) {
                             ]);
 
                             // 2) AuditLog insert
-                            // Same Type = 'Stock Transfer' per spec
                             $stmtAudit = $pdo->prepare("
                                 INSERT INTO AuditLog
                                     (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity, Make, Model, Description)
@@ -330,6 +329,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['do_action'])) {
                             $pdo->commit();
 
                             $actionSuccess = "Count was successfully corrected.";
+                            // After submit, hide area
                             $currentAction = '';
                             $selectedRow   = null;
                             $correctNewQty = '';
@@ -602,7 +602,7 @@ $distinctCats   = $pdo->query("SELECT DISTINCT Category FROM ShopInventory ORDER
                 </div>
 
                 <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-                    <button type="submit" class="btn">Save Transfer</button>
+                    <button type="submit" class="btn">Submit</button>
                     <a href="shop_inventory.php" class="btn btn-secondary">Cancel</a>
                 </div>
 
@@ -643,7 +643,7 @@ $distinctCats   = $pdo->query("SELECT DISTINCT Category FROM ShopInventory ORDER
                 </div>
 
                 <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-                    <button type="submit" class="btn">Save Correction</button>
+                    <button type="submit" class="btn">Submit</button>
                     <a href="shop_inventory.php" class="btn btn-secondary">Cancel</a>
                 </div>
 
@@ -724,7 +724,7 @@ $distinctCats   = $pdo->query("SELECT DISTINCT Category FROM ShopInventory ORDER
         <div class="table-container">
             <table>
                 <tr>
-                    <th>ID</th>
+                    <!-- ID column removed -->
                     <th>Make</th>
                     <th>Model</th>
                     <th>Category</th>
@@ -736,12 +736,12 @@ $distinctCats   = $pdo->query("SELECT DISTINCT Category FROM ShopInventory ORDER
                 </tr>
                 <?php if (empty($rows)): ?>
                     <tr>
-                        <td colspan="9" style="text-align:center;">No records found.</td>
+                        <td colspan="8" style="text-align:center;">No records found.</td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($rows as $r): ?>
                         <tr>
-                            <td><?= htmlspecialchars($r['ID']) ?></td>
+                            <!-- ID no longer shown -->
                             <td><?= htmlspecialchars($r['Make']) ?></td>
                             <td><?= htmlspecialchars($r['Model']) ?></td>
                             <td><?= htmlspecialchars($r['Category']) ?></td>
