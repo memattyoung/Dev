@@ -81,7 +81,6 @@ if (!isset($_SESSION['logged_in'])) {
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
                 ]);
 
-                // 🔹 CHANGED: now also selecting Manager
                 $sqlEmp = "
                     SELECT AAA, FirstName, LastName, Manager
                     FROM Employee
@@ -103,7 +102,7 @@ if (!isset($_SESSION['logged_in'])) {
                     // Insert AuditLog record for Log On
                     $insertLogin = $pdoLogin->prepare("
                         INSERT INTO AuditLog
-                            (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer,LastUpdate, StockType, Quantity) 
+                            (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity) 
                         VALUES
                             (:empId, :empName, '', '', '', 'Log On', '', '', '', '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
                     ");
@@ -119,10 +118,9 @@ if (!isset($_SESSION['logged_in'])) {
                     $_SESSION['empFirst']      = $emp['FirstName'];
                     $_SESSION['empLast']       = $emp['LastName'];
                     $_SESSION['empName']       = $empName;
+                    // Manager flag (assuming 1 = manager, 0 = not)
+                    $_SESSION['empManager']    = (int)($emp['Manager'] ?? 0);
                     $_SESSION['last_activity'] = time(); // start timeout timer
-
-                    // 🔹 NEW: store manager flag in session
-                    $_SESSION['isManager']     = !empty($emp['Manager']);
 
                     header("Location: " . $_SERVER['PHP_SELF']);
                     exit;
@@ -173,9 +171,9 @@ if (!isset($_SESSION['logged_in'])) {
 }
 
 // ===== WE HAVE A LOGGED IN USER =====
-$empAAA     = $_SESSION['empAAA']  ?? 'WEBUSER';
-$empName    = $_SESSION['empName'] ?? 'Tuna Marie';
-$isManager  = !empty($_SESSION['isManager']);   // 🔹 NEW
+$empAAA    = $_SESSION['empAAA']  ?? 'WEBUSER';
+$empName   = $_SESSION['empName'] ?? 'Tuna Marie';
+$isManager = !empty($_SESSION['empManager']);
 
 // ===== CONNECT TO DB =====
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
@@ -189,8 +187,8 @@ try {
 }
 
 // ===== ROUTING / STATE =====
-// views: menu | inventory | sell | transfer | scrap | stocktruck | history
-$view = $_GET['view'] ?? 'menu';
+// views: manager_home | menu | inventory | sell | transfer | scrap | stocktruck | history
+$view = $_GET['view'] ?? ($isManager ? 'manager_home' : 'menu');
 $msg  = $_GET['msg']  ?? '';
 
 // Predeclare vars
@@ -416,7 +414,6 @@ if ($view === 'transfer') {
         ];
     }
 
-    // Sort: shops first, then trucks; each group ascending by name
     usort($destRows, function($a, $b) {
         if ($a['Type'] !== $b['Type']) {
             return ($a['Type'] === 'SHOP') ? -1 : 1;
@@ -480,7 +477,6 @@ if ($view === 'transfer') {
             $battery   = trim($_POST['battery'] ?? '');
             $dateCode  = trim($_POST['date_code'] ?? '');
 
-            // keep UI selections
             $transferToLoc     = $toLoc;
             $transferBatteryId = $bid;
 
@@ -538,10 +534,9 @@ if ($view === 'transfer') {
 
                         $pdo->commit();
 
-                        // Stay on Transfer page and show success
                         $transferSuccess   = "Battery was successfully transferred and logged.";
                         $transferPreview   = null;
-                        $transferBatteryId = ""; // clear BatteryID prompt after successful transfer
+                        $transferBatteryId = "";
                     }
 
                 } catch (Exception $e) {
@@ -589,7 +584,6 @@ if ($view === 'scrap') {
             $bid       = trim($_POST['battery_id'] ?? '');
             $reasonRaw = $_POST['reason'] ?? '';
 
-            // We’ll requery battery info for safety
             if ($bid === '') {
                 $scrapError = "Missing BatteryID.";
             } else {
@@ -610,13 +604,11 @@ if ($view === 'scrap') {
                 if (!$row) {
                     $scrapError = "Battery not found, or it is already SOLD/SCRAPPED/ROTATED.";
                 } else {
-                    // Validate reason
                     $reasonTrim  = trim($reasonRaw);
                     if ($reasonTrim === '') {
                         $scrapError = "Reason is required to scrap a battery.";
-                        $scrapInfo  = $row; // keep display
+                        $scrapInfo  = $row;
                     } else {
-                        // Clean reason: remove single quotes & limit to 255 chars
                         $reasonClean = str_replace("'", "", $reasonTrim);
                         $reasonClean = mb_substr($reasonClean, 0, 255);
 
@@ -626,7 +618,6 @@ if ($view === 'scrap') {
                             $fromLoc = $row['Location'];
                             $now     = date('Y-m-d H:i:s');
 
-                            // Update BatteryInventory to SCRAPPED
                             $update = $pdo->prepare("
                                 UPDATE BatteryInventory 
                                 SET Location = 'SCRAPPED'
@@ -635,7 +626,6 @@ if ($view === 'scrap') {
                             ");
                             $update->execute([':bid' => $bid]);
 
-                            // Insert AuditLog (ToLoc = SCRAPPED, Reason = user text)
                             $insert = $pdo->prepare("
                                 INSERT INTO AuditLog
                                     (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity)
@@ -672,7 +662,6 @@ if ($view === 'scrap') {
 
 // ===== STOCK TRUCK SECTION =====
 if ($view === 'stocktruck') {
-    // Load truck list (from Trucks.Truck)
     $stmtTrucks = $pdo->query("
         SELECT Truck
         FROM Trucks
@@ -681,7 +670,6 @@ if ($view === 'stocktruck') {
     ");
     $stockTruckTruckList = $stmtTrucks->fetchAll(PDO::FETCH_COLUMN);
 
-    // Load shop list (from Location.Location)
     $stmtShops = $pdo->query("
         SELECT Location
         FROM Location
@@ -695,7 +683,6 @@ if ($view === 'stocktruck') {
         $stockTruckSelectedShop      = trim($_POST['shop_loc'] ?? '');
         $stockTruckTransferBatteryId = trim($_POST['battery_id'] ?? $stockTruckTransferBatteryId);
 
-        // Helper function to run the stock query
         $runStockQuery = function($pdo, $truck) {
             $sqlTruck = "
                 SELECT 
@@ -741,7 +728,6 @@ if ($view === 'stocktruck') {
             return $stmtTruck->fetchAll(PDO::FETCH_ASSOC);
         };
 
-        // Show truck stock
         if (isset($_POST['show_truck'])) {
             $stockTruckShowConfirmClear = false;
             if ($stockTruckSelectedTruck === '') {
@@ -751,8 +737,6 @@ if ($view === 'stocktruck') {
                 $stockTruckDidShowQuery  = true;
             }
         }
-
-        // Step: Transfer battery to this truck
         elseif (isset($_POST['transfer_to_truck'])) {
             $stockTruckDidShowQuery = true;
             $stockTruckShowConfirmClear = false;
@@ -762,11 +746,9 @@ if ($view === 'stocktruck') {
             } elseif ($stockTruckTransferBatteryId === '') {
                 $stockTruckError = "Please enter a BatteryID to transfer.";
             } else {
-                // Same logic as Transfer, but ToLoc = current truck
                 $bid = $stockTruckTransferBatteryId;
 
                 try {
-                    // Check battery status
                     $sql = "
                         SELECT 
                             BatteryInventory.BatteryID,
@@ -793,7 +775,6 @@ if ($view === 'stocktruck') {
 
                         $pdo->beginTransaction();
 
-                        // Re-check current location in transaction
                         $check = $pdo->prepare("
                             SELECT Location
                             FROM BatteryInventory
@@ -809,7 +790,6 @@ if ($view === 'stocktruck') {
                         } else {
                             $now = date('Y-m-d H:i:s');
 
-                            // Update BatteryInventory
                             $update = $pdo->prepare("
                                 UPDATE BatteryInventory
                                 SET Location = :toLoc
@@ -820,7 +800,6 @@ if ($view === 'stocktruck') {
                                 ':bid'   => $bid
                             ]);
 
-                            // Insert AuditLog
                             $insert = $pdo->prepare("
                                 INSERT INTO AuditLog
                                     (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity)
@@ -841,7 +820,7 @@ if ($view === 'stocktruck') {
                             $pdo->commit();
 
                             $stockTruckMessage           = "Battery $bid transferred to truck $toLoc.";
-                            $stockTruckTransferBatteryId = ""; // clear BatteryID after transfer
+                            $stockTruckTransferBatteryId = "";
                         }
                     }
 
@@ -853,14 +832,11 @@ if ($view === 'stocktruck') {
                 }
             }
 
-            // Always rerun query (if truck selected)
             if ($stockTruckSelectedTruck !== '') {
                 $stockTruckRows         = $runStockQuery($pdo, $stockTruckSelectedTruck);
                 $stockTruckDidShowQuery = true;
             }
         }
-
-        // Step 1: User clicked "Clear Truck Inventory" (show warning + shop)
         elseif (isset($_POST['start_clear'])) {
             if ($stockTruckSelectedTruck === '') {
                 $stockTruckError = "Please select a truck before clearing.";
@@ -870,8 +846,6 @@ if ($view === 'stocktruck') {
                 $stockTruckShowConfirmClear = true;
             }
         }
-
-        // Step 2: Process the clear after warning + shop select
         elseif (isset($_POST['process_clear'])) {
             if ($stockTruckSelectedTruck === '') {
                 $stockTruckError = "Please select a truck before clearing.";
@@ -883,7 +857,6 @@ if ($view === 'stocktruck') {
                 try {
                     $pdo->beginTransaction();
 
-                    // Select all battery inventory on that truck
                     $selInv = $pdo->prepare("
                         SELECT BatteryID, Battery, DateCode
                         FROM BatteryInventory
@@ -897,7 +870,6 @@ if ($view === 'stocktruck') {
                         $stockTruckError = "No battery inventory found on truck " . $stockTruckSelectedTruck . ".";
                         $stockTruckShowConfirmClear = true;
                     } else {
-                        // Move inventory to selected shop
                         $updInv = $pdo->prepare("
                             UPDATE BatteryInventory
                             SET Location = :shop
@@ -908,7 +880,6 @@ if ($view === 'stocktruck') {
                             ':truck' => $stockTruckSelectedTruck
                         ]);
 
-                        // Insert one AuditLog record per battery
                         $insAudit = $pdo->prepare("
                             INSERT INTO AuditLog
                                 (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity)
@@ -949,7 +920,6 @@ if ($view === 'stocktruck') {
                 }
             }
 
-            // Re-run query to show updated view (may be empty after clear)
             if ($stockTruckSelectedTruck !== '') {
                 $stockTruckRows         = $runStockQuery($pdo, $stockTruckSelectedTruck);
                 $stockTruckDidShowQuery = true;
@@ -983,30 +953,30 @@ if ($view === 'history') {
     }
 }
 
-// ===== SOLD TODAY COUNT (BASED ON EST/EDT) =====
-// 🔹 CHANGED: compute for all views so footer can always show it
-try {
-    $startToday = date('Y-m-d 00:00:00');
-    $endToday   = date('Y-m-d 23:59:59');
+// ===== SOLD TODAY COUNT (MENU ONLY, BASED ON EST/EDT) =====
+if ($view === 'menu') {
+    try {
+        $startToday = date('Y-m-d 00:00:00');
+        $endToday   = date('Y-m-d 23:59:59');
 
-    $stmtSold = $pdo->prepare("
-        SELECT COUNT(*) AS cnt
-        FROM AuditLog
-        WHERE EmployeeID = :empId
-          AND ToLoc = 'SOLD'
-          AND LastUpdate >= :startToday
-          AND LastUpdate <= :endToday
-    ");
-    $stmtSold->execute([
-        ':empId'      => $empAAA,
-        ':startToday' => $startToday,
-        ':endToday'   => $endToday,
-    ]);
-    $soldTodayCount = (int)$stmtSold->fetchColumn();
-} catch (Exception $e) {
-    $soldTodayCount = 0;
+        $stmtSold = $pdo->prepare("
+            SELECT COUNT(*) AS cnt
+            FROM AuditLog
+            WHERE EmployeeID = :empId
+              AND ToLoc = 'SOLD'
+              AND LastUpdate >= :startToday
+              AND LastUpdate <= :endToday
+        ");
+        $stmtSold->execute([
+            ':empId'      => $empAAA,
+            ':startToday' => $startToday,
+            ':endToday'   => $endToday,
+        ]);
+        $soldTodayCount = (int)$stmtSold->fetchColumn();
+    } catch (Exception $e) {
+        $soldTodayCount = 0;
+    }
 }
-
 ?>
 <!doctype html>
 <html>
@@ -1140,6 +1110,16 @@ try {
             font-size: 12px;
             color: #6b7280;
         }
+        .flex-row-between {
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:8px;
+            flex-wrap:wrap;
+        }
+        .top-bar-btn {
+            max-width:200px;
+        }
     </style>
 </head>
 <body>
@@ -1148,22 +1128,61 @@ try {
     <h1>Browns Towing Battery Program</h1>
 
     <?php if ($msg === 'sold'): ?>
-        <div class="msg msg-success card">
+        <div class="msg msg-success">
             Battery was successfully sold and logged.
         </div>
     <?php elseif ($msg === 'transferred'): ?>
-        <div class="msg msg-success card">
+        <div class="msg msg-success">
             Battery was successfully transferred and logged.
         </div>
     <?php elseif ($msg === 'scrapped'): ?>
-        <div class="msg msg-success card">
+        <div class="msg msg-success">
             Battery was successfully scrapped and logged.
         </div>
     <?php endif; ?>
 
-    <?php if ($view === 'menu'): ?>
+    <?php if ($view === 'manager_home'): ?>
+
+        <h2>Manager Menu</h2>
+
+        <div class="card">
+            <p class="text-center" style="font-size:13px; color:#6b7280;">
+                Logged in as <strong><?= htmlspecialchars($empName) ?></strong>
+                (<?= htmlspecialchars($empAAA) ?>) – Manager.
+            </p>
+        </div>
+
+        <div class="menu-grid">
+            <a class="btn" href="shop_inventory.php">Inventory (Shop Stock)</a>
+            <a class="btn" href="?view=menu">Battery Program</a>
+        </div>
+
+        <div class="card">
+            <div class="text-center mt-10">
+                <a href="?logout=1" class="btn btn-secondary top-bar-btn">
+                    Logout
+                </a>
+            </div>
+        </div>
+
+    <?php elseif ($view === 'menu'): ?>
 
         <h2>Main Menu</h2>
+
+        <div class="card">
+            <div class="flex-row-between">
+                <p style="font-size:13px; color:#6b7280; margin:0;">
+                    Logged in as <strong><?= htmlspecialchars($empName) ?></strong>
+                    (<?= htmlspecialchars($empAAA) ?>).
+                </p>
+                <?php if ($isManager): ?>
+                    <a href="?view=manager_home" class="btn btn-secondary top-bar-btn">
+                        Manager Menu
+                    </a>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <div class="menu-grid">
             <a class="btn" href="?view=inventory">Inventory</a>
             <a class="btn" href="?view=sell">Sell Battery</a>
@@ -1173,11 +1192,33 @@ try {
             <a class="btn" href="?view=history">History</a>
         </div>
 
-        <!-- 🔹 Removed the old top card with login info & logout here -->
+        <div class="card">
+            <?php if ($soldTodayCount > 0): ?>
+                <p class="text-center" style="font-size:13px; color:#166534; margin-top:6px;">
+                    You have sold <strong><?= $soldTodayCount ?></strong>
+                    battery<?= ($soldTodayCount === 1 ? '' : 'ies') ?> so far today.
+                </p>
+            <?php endif; ?>
+
+            <div class="text-center mt-10">
+                <a href="?logout=1" class="btn btn-secondary top-bar-btn">
+                    Logout
+                </a>
+            </div>
+        </div>
 
     <?php elseif ($view === 'inventory'): ?>
 
         <h2>Inventory Summary</h2>
+        <div class="card">
+            <div class="flex-row-between">
+                <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <div class="card">
             <form method="get">
                 <input type="hidden" name="view" value="inventory">
@@ -1248,7 +1289,12 @@ try {
         <h2>Sell a Battery</h2>
 
         <div class="card">
-            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+            <div class="flex-row-between">
+                <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
+            </div>
         </div>
 
         <?php if (!empty($sellError)): ?>
@@ -1257,7 +1303,6 @@ try {
             </div>
         <?php endif; ?>
 
-        <!-- Step 1: Lookup -->
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
@@ -1273,7 +1318,6 @@ try {
                         Scan
                     </button>
                 </div>
-
                 <button type="submit" name="lookup_battery" class="btn mt-10">
                     Lookup Battery
                 </button>
@@ -1283,7 +1327,6 @@ try {
             </p>
         </div>
 
-        <!-- Step 2: Confirm Sale -->
         <?php if ($sellInfo): ?>
             <div class="card">
                 <h3 style="margin-top:0;">Confirm Sale</h3>
@@ -1307,7 +1350,12 @@ try {
         <h2>Transfer a Battery</h2>
 
         <div class="card">
-            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+            <div class="flex-row-between">
+                <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
+            </div>
         </div>
 
         <?php if (!empty($transferError)): ?>
@@ -1322,7 +1370,6 @@ try {
             </div>
         <?php endif; ?>
 
-        <!-- Step 1: BatteryID + Destination -->
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
@@ -1364,7 +1411,6 @@ try {
             </p>
         </div>
 
-        <!-- Step 2: Preview + Confirm -->
         <?php if ($transferPreview): ?>
             <div class="card">
                 <h3 style="margin-top:0;">Confirm Transfer</h3>
@@ -1398,7 +1444,12 @@ try {
         <h2>Scrap a Battery</h2>
 
         <div class="card">
-            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+            <div class="flex-row-between">
+                <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
+            </div>
         </div>
 
         <?php if (!empty($scrapError)): ?>
@@ -1407,7 +1458,6 @@ try {
             </div>
         <?php endif; ?>
 
-        <!-- Step 1: Lookup -->
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
@@ -1433,7 +1483,6 @@ try {
             </p>
         </div>
 
-        <!-- Step 2: Confirm Scrap + Reason -->
         <?php if ($scrapInfo): ?>
             <div class="card">
                 <h3 style="margin-top:0;">Confirm Scrap</h3>
@@ -1466,7 +1515,12 @@ try {
         <h2>Stock Truck</h2>
 
         <div class="card">
-            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+            <div class="flex-row-between">
+                <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
+            </div>
         </div>
 
         <?php if (!empty($stockTruckError)): ?>
@@ -1481,7 +1535,6 @@ try {
             </div>
         <?php endif; ?>
 
-        <!-- Select Truck & Show Stock -->
         <div class="card">
             <form method="post">
                 <label class="label-block">Truck</label>
@@ -1504,7 +1557,6 @@ try {
             </p>
         </div>
 
-        <!-- Stock Results -->
         <?php if ($stockTruckDidShowQuery && $stockTruckSelectedTruck !== ''): ?>
             <div class="card">
                 <h3 style="margin-top:0;">Truck Stock for <?= htmlspecialchars($stockTruckSelectedTruck) ?></h3>
@@ -1541,7 +1593,6 @@ try {
             </div>
         <?php endif; ?>
 
-        <!-- Transfer battery TO this truck (only after query) -->
         <?php if ($stockTruckDidShowQuery && $stockTruckSelectedTruck !== ''): ?>
             <div class="card">
                 <h3 style="margin-top:0;">Transfer Battery to This Truck</h3>
@@ -1572,7 +1623,6 @@ try {
             </div>
         <?php endif; ?>
 
-        <!-- Step 1: Show Clear Truck option ONLY after query has been run -->
         <?php if ($stockTruckDidShowQuery && !$stockTruckShowConfirmClear && $stockTruckSelectedTruck !== ''): ?>
             <div class="card">
                 <h3 style="margin-top:0;">Clear Truck Inventory</h3>
@@ -1588,7 +1638,6 @@ try {
             </div>
         <?php endif; ?>
 
-        <!-- Step 2: Warning + Shop selection + Process button -->
         <?php if ($stockTruckShowConfirmClear && $stockTruckSelectedTruck !== ''): ?>
             <div class="card">
                 <h3 style="margin-top:0;">Confirm Clear Truck</h3>
@@ -1625,7 +1674,12 @@ try {
         <h2>History</h2>
 
         <div class="card">
-            <a class="btn btn-secondary" href="?view=menu">Back to Menu</a>
+            <div class="flex-row-between">
+                <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
+            </div>
         </div>
 
         <div class="card">
@@ -1676,37 +1730,6 @@ try {
 
     <?php endif; ?>
 
-    <!-- 🔻 NEW FOOTER: login info + Back to Manager Menu (if manager) + Logout -->
-    <div class="card">
-        <p class="text-center" style="font-size:13px; color:#6b7280;">
-            Logged in as <strong><?= htmlspecialchars($empName) ?></strong>
-            (<?= htmlspecialchars($empAAA) ?>).
-        </p>
-
-        <?php if ($soldTodayCount > 0): ?>
-            <p class="text-center" style="font-size:13px; color:#166534; margin-top:4px;">
-                You have sold <strong><?= $soldTodayCount ?></strong>
-                battery<?= ($soldTodayCount === 1 ? '' : 'ies') ?> so far today.
-            </p>
-        <?php endif; ?>
-
-        <div class="text-center mt-10">
-            <?php if ($isManager): ?>
-                <!-- Change manager.php to your actual manager menu file if different -->
-                <a href="manager.php"
-                   class="btn btn-secondary"
-                   style="max-width:200px; display:inline-block; margin-right:8px;">
-                    Back to Manager Menu
-                </a>
-            <?php endif; ?>
-            <a href="?logout=1"
-               class="btn btn-secondary"
-               style="max-width:200px; display:inline-block;">
-                Logout
-            </a>
-        </div>
-    </div>
-
 </div>
 
 <!-- Barcode Scanner Modal -->
@@ -1748,7 +1771,6 @@ try {
     </div>
 </div>
 
-<!-- ZXing and scanner script -->
 <script src="https://unpkg.com/@zxing/library@latest"></script>
 <script>
     let selectedInputId = null;
@@ -1765,11 +1787,11 @@ try {
                 if (!AC) return;
                 audioCtx = new AC();
             }
-            const duration = 0.15; // seconds
+            const duration = 0.15;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.type = 'sine';
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // A5-ish
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime);
             gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
 
             osc.connect(gain);
@@ -1795,7 +1817,6 @@ try {
 
     async function startDecodingWithCurrentDevice() {
         if (!videoInputDevices.length) return;
-
         const device = videoInputDevices[currentDeviceIndex];
         const deviceId = device.deviceId;
 
@@ -1803,8 +1824,6 @@ try {
 
         try {
             const video = document.getElementById('scannerVideo');
-
-            // ZXing will call getUserMedia under the hood
             codeReader.decodeFromVideoDevice(deviceId, 'scannerVideo', (result, err) => {
                 if (result) {
                     const input = document.getElementById(selectedInputId);
@@ -1814,10 +1833,8 @@ try {
                     playBeep();
                     closeScanner();
                 }
-                // err is usually "NotFoundException" while scanning – safe to ignore
             });
 
-            // Save the stream from the video element once it starts
             setTimeout(() => {
                 if (video && video.srcObject) {
                     currentStream = video.srcObject;
@@ -1832,19 +1849,16 @@ try {
     }
 
     function pickBackCameraIndex(devices) {
-        // Prefer labels that look like back/rear/environment
         let idx = devices.findIndex(d =>
             /back|rear|environment/i.test(d.label)
         );
         if (idx !== -1) return idx;
 
-        // Next, prefer anything that is NOT clearly front
         idx = devices.findIndex(d =>
             !/front|user/i.test(d.label)
         );
         if (idx !== -1) return idx;
 
-        // Fallback to first
         return 0;
     }
 
@@ -1858,7 +1872,6 @@ try {
         }
 
         try {
-            // Get list of cameras
             videoInputDevices = await codeReader.listVideoInputDevices();
             if (!videoInputDevices.length) {
                 alert('No camera found on this device.');
@@ -1877,14 +1890,12 @@ try {
 
     function switchCamera() {
         if (!videoInputDevices.length || !codeReader) return;
-
         try {
             codeReader.reset();
         } catch (e) {
             console.warn(e);
         }
         stopCurrentStream();
-
         currentDeviceIndex = (currentDeviceIndex + 1) % videoInputDevices.length;
         startDecodingWithCurrentDevice();
     }
