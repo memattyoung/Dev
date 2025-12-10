@@ -5,7 +5,6 @@ $dbName = getenv('BROWNS_DB_NAME');
 $dbUser = getenv('BROWNS_DB_USER');
 $dbPass = getenv('BROWNS_DB_PASS');
 
-// Optional sanity check while we're setting this up:
 if (!$dbHost || !$dbName || !$dbUser || !$dbPass) {
     die("Database environment variables are not set. Check Render env vars.");
 }
@@ -18,7 +17,6 @@ session_start();
 
 // ===== LOGOUT HANDLER =====
 if (isset($_GET['logout'])) {
-    // Clear session data
     $_SESSION = [];
     if (ini_get("session.use_cookies")) {
         $params = session_get_cookie_params();
@@ -118,10 +116,19 @@ if (!isset($_SESSION['logged_in'])) {
                     $_SESSION['empFirst']      = $emp['FirstName'];
                     $_SESSION['empLast']       = $emp['LastName'];
                     $_SESSION['empName']       = $empName;
-                    // Manager flag (assuming 1 = manager, 0 = not)
                     $_SESSION['empManager']    = (int)($emp['Manager'] ?? 0);
                     $_SESSION['last_activity'] = time(); // start timeout timer
 
+                    // DISPATCH-only flag
+                    $_SESSION['isDispatchOnly'] = (strtoupper($empId) === 'DISPATCH');
+
+                    // If DISPATCH, go straight to battery inventory (view only)
+                    if (!empty($_SESSION['isDispatchOnly'])) {
+                        header("Location: battery_inventory.php?view=inventory");
+                        exit;
+                    }
+
+                    // Everyone else goes to main menu
                     header("Location: " . $_SERVER['PHP_SELF']);
                     exit;
                 } else {
@@ -171,11 +178,18 @@ if (!isset($_SESSION['logged_in'])) {
 }
 
 // ===== WE HAVE A LOGGED IN USER =====
-$empAAA    = $_SESSION['empAAA']  ?? 'WEBUSER';
-$empName   = $_SESSION['empName'] ?? 'Tuna Marie';
-$isManager = !empty($_SESSION['empManager']);
+$empAAA         = $_SESSION['empAAA']        ?? 'WEBUSER';
+$empName        = $_SESSION['empName']       ?? 'Tuna Marie';
+$isManager      = !empty($_SESSION['empManager']);
+$isDispatchOnly = !empty($_SESSION['isDispatchOnly'] ?? 0);
 
-// ===== CONNECT TO DB (for menu stats) =====
+// DISPATCH should never see this page; always redirect to inventory-only view
+if ($isDispatchOnly) {
+    header("Location: battery_inventory.php?view=inventory");
+    exit;
+}
+
+// ===== CONNECT TO DB =====
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
 
 try {
@@ -186,13 +200,12 @@ try {
     die("DB connection failed: " . htmlspecialchars($e->getMessage()));
 }
 
-// ===== ROUTING / STATE (ONLY MANAGER_HOME + MENU HERE) =====
+// ===== ROUTING =====
 $view = $_GET['view'] ?? ($isManager ? 'manager_home' : 'menu');
 $msg  = $_GET['msg']  ?? '';
 
+// SOLD TODAY COUNT (for battery menu)
 $soldTodayCount = 0;
-
-// ===== SOLD TODAY COUNT (MENU ONLY, BASED ON EST/EDT) =====
 if ($view === 'menu') {
     try {
         $startToday = date('Y-m-d 00:00:00');
@@ -277,6 +290,11 @@ if ($view === 'menu') {
         .text-center {
             text-align: center;
         }
+        .small-note {
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .mt-10 { margin-top: 10px; }
         .msg {
             padding: 8px;
             border-radius: 4px;
@@ -287,11 +305,13 @@ if ($view === 'menu') {
             background: #dcfce7;
             color: #166534;
         }
-        .small-note {
-            font-size: 12px;
-            color: #6b7280;
+        .flex-row-between {
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:8px;
+            flex-wrap:wrap;
         }
-        .mt-10 { margin-top: 10px; }
         .top-bar-btn {
             max-width:200px;
         }
@@ -306,13 +326,13 @@ if ($view === 'menu') {
         <div class="msg msg-success">
             Battery was successfully sold and logged.
         </div>
-    <?php elseif ($msg === 'transferred'): ?>
-        <div class="msg msg-success">
-            Battery was successfully transferred and logged.
-        </div>
     <?php elseif ($msg === 'scrapped'): ?>
         <div class="msg msg-success">
             Battery was successfully scrapped and logged.
+        </div>
+    <?php elseif ($msg === 'transferred'): ?>
+        <div class="msg msg-success">
+            Battery was successfully transferred and logged.
         </div>
     <?php endif; ?>
 
@@ -340,7 +360,7 @@ if ($view === 'menu') {
             </div>
         </div>
 
-    <?php /* ===== MAIN BATTERY MENU ===== */ elseif ($view === 'menu'): ?>
+    <?php elseif ($view === 'menu'): ?>
 
         <h2>Main Menu</h2>
 
