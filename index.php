@@ -5,6 +5,7 @@ $dbName = getenv('BROWNS_DB_NAME');
 $dbUser = getenv('BROWNS_DB_USER');
 $dbPass = getenv('BROWNS_DB_PASS');
 
+// Optional sanity check while we're setting this up:
 if (!$dbHost || !$dbName || !$dbUser || !$dbPass) {
     die("Database environment variables are not set. Check Render env vars.");
 }
@@ -17,6 +18,7 @@ session_start();
 
 // ===== LOGOUT HANDLER =====
 if (isset($_GET['logout'])) {
+    // Clear session data
     $_SESSION = [];
     if (ini_get("session.use_cookies")) {
         $params = session_get_cookie_params();
@@ -67,8 +69,10 @@ if (!isset($_SESSION['logged_in'])) {
     $error = "";
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $aaa = trim($_POST['aaa'] ?? '');
-        $pwd = trim($_POST['password'] ?? '');
+        // Force AAA to uppercase so DISPATCH matches regardless of how they type it
+        $aaaInput = trim($_POST['aaa'] ?? '');
+        $aaa      = strtoupper($aaaInput);
+        $pwd      = trim($_POST['password'] ?? '');
 
         if ($aaa === '' || $pwd === '') {
             $error = "Please enter both AAA and Password.";
@@ -100,9 +104,12 @@ if (!isset($_SESSION['logged_in'])) {
                     // Insert AuditLog record for Log On
                     $insertLogin = $pdoLogin->prepare("
                         INSERT INTO AuditLog
-                            (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity) 
+                            (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type,
+                             Invoice, Battery, DateCode, Reason, Location, Computer,
+                             LastUpdate, StockType, Quantity) 
                         VALUES
-                            (:empId, :empName, '', '', '', 'Log On', '', '', '', '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
+                            (:empId, :empName, '', '', '', 'Log On', '',
+                             '', '', '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
                     ");
                     $insertLogin->execute([
                         ':empId'      => $empId,
@@ -116,19 +123,19 @@ if (!isset($_SESSION['logged_in'])) {
                     $_SESSION['empFirst']      = $emp['FirstName'];
                     $_SESSION['empLast']       = $emp['LastName'];
                     $_SESSION['empName']       = $empName;
+                    // Manager flag (assuming 1 = manager, 0 = not)
                     $_SESSION['empManager']    = (int)($emp['Manager'] ?? 0);
-                    $_SESSION['last_activity'] = time(); // start timeout timer
-
-                    // DISPATCH-only flag
+                    // Dispatch-only user flag
                     $_SESSION['isDispatchOnly'] = (strtoupper($empId) === 'DISPATCH');
+                    $_SESSION['last_activity']  = time(); // start timeout timer
 
-                    // If DISPATCH, go straight to battery inventory (view only)
-                    if (!empty($_SESSION['isDispatchOnly'])) {
+                    // If DISPATCH, go straight to inventory-only view
+                    if ($_SESSION['isDispatchOnly']) {
                         header("Location: battery_inventory.php?view=inventory");
                         exit;
                     }
 
-                    // Everyone else goes to main menu
+                    // Everyone else lands on this main index menu
                     header("Location: " . $_SERVER['PHP_SELF']);
                     exit;
                 } else {
@@ -179,56 +186,21 @@ if (!isset($_SESSION['logged_in'])) {
 
 // ===== WE HAVE A LOGGED IN USER =====
 $empAAA         = $_SESSION['empAAA']        ?? 'WEBUSER';
-$empName        = $_SESSION['empName']       ?? 'Tuna Marie';
+$empName        = $_SESSION['empName']       ?? 'User';
 $isManager      = !empty($_SESSION['empManager']);
-$isDispatchOnly = !empty($_SESSION['isDispatchOnly'] ?? 0);
+$isDispatchOnly = !empty($_SESSION['isDispatchOnly']);
 
-// DISPATCH should never see this page; always redirect to inventory-only view
+// If dispatch-only, always force them straight into inventory-only screen
 if ($isDispatchOnly) {
     header("Location: battery_inventory.php?view=inventory");
     exit;
 }
 
-// ===== CONNECT TO DB =====
-$dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
-
-try {
-    $pdo = new PDO($dsn, $dbUser, $dbPass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
-    ]);
-} catch (Exception $e) {
-    die("DB connection failed: " . htmlspecialchars($e->getMessage()));
-}
-
-// ===== ROUTING =====
+// ===== ROUTING / STATE (for non-dispatch users) =====
+// views: manager_home | menu
 $view = $_GET['view'] ?? ($isManager ? 'manager_home' : 'menu');
 $msg  = $_GET['msg']  ?? '';
 
-// SOLD TODAY COUNT (for battery menu)
-$soldTodayCount = 0;
-if ($view === 'menu') {
-    try {
-        $startToday = date('Y-m-d 00:00:00');
-        $endToday   = date('Y-m-d 23:59:59');
-
-        $stmtSold = $pdo->prepare("
-            SELECT COUNT(*) AS cnt
-            FROM AuditLog
-            WHERE EmployeeID = :empId
-              AND ToLoc = 'SOLD'
-              AND LastUpdate >= :startToday
-              AND LastUpdate <= :endToday
-        ");
-        $stmtSold->execute([
-            ':empId'      => $empAAA,
-            ':startToday' => $startToday,
-            ':endToday'   => $endToday,
-        ]);
-        $soldTodayCount = (int)$stmtSold->fetchColumn();
-    } catch (Exception $e) {
-        $soldTodayCount = 0;
-    }
-}
 ?>
 <!doctype html>
 <html>
@@ -258,7 +230,7 @@ if ($view === 'menu') {
         }
         @media (min-width: 600px) {
             .menu-grid {
-                grid-template-columns: repeat(4, 1fr);
+                grid-template-columns: repeat(2, 1fr);
             }
         }
         .btn {
@@ -295,15 +267,8 @@ if ($view === 'menu') {
             color: #6b7280;
         }
         .mt-10 { margin-top: 10px; }
-        .msg {
-            padding: 8px;
-            border-radius: 4px;
-            margin-top: 10px;
-            font-size: 14px;
-        }
-        .msg-success {
-            background: #dcfce7;
-            color: #166534;
+        .top-bar-btn {
+            max-width:200px;
         }
         .flex-row-between {
             display:flex;
@@ -312,9 +277,6 @@ if ($view === 'menu') {
             gap:8px;
             flex-wrap:wrap;
         }
-        .top-bar-btn {
-            max-width:200px;
-        }
     </style>
 </head>
 <body>
@@ -322,18 +284,8 @@ if ($view === 'menu') {
 
     <h1>Browns Towing Battery Program</h1>
 
-    <?php if ($msg === 'sold'): ?>
-        <div class="msg msg-success">
-            Battery was successfully sold and logged.
-        </div>
-    <?php elseif ($msg === 'scrapped'): ?>
-        <div class="msg msg-success">
-            Battery was successfully scrapped and logged.
-        </div>
-    <?php elseif ($msg === 'transferred'): ?>
-        <div class="msg msg-success">
-            Battery was successfully transferred and logged.
-        </div>
+    <?php if ($msg === 'something'): ?>
+        <!-- placeholder for any future messages -->
     <?php endif; ?>
 
     <?php if ($view === 'manager_home'): ?>
@@ -348,8 +300,8 @@ if ($view === 'menu') {
         </div>
 
         <div class="menu-grid">
-            <a class="btn" href="shop_inventory.php">Inventory (Shop Stock)</a>
-            <a class="btn" href="?view=menu">Battery Program</a>
+            <a class="btn" href="shop_inventory.php">Shop Inventory</a>
+            <a class="btn" href="battery_inventory.php?view=menu">Battery Program</a>
         </div>
 
         <div class="card">
@@ -364,36 +316,21 @@ if ($view === 'menu') {
 
         <h2>Main Menu</h2>
 
-        <div class="menu-grid">
-            <a class="btn" href="battery_inventory.php?view=inventory">Inventory</a>
-            <a class="btn" href="battery_inventory.php?view=sell">Sell Battery</a>
-            <a class="btn" href="battery_inventory.php?view=stocktruck">Stock Truck</a>
-            <a class="btn" href="battery_inventory.php?view=transfer">Transfer Battery</a>
-            <a class="btn" href="battery_inventory.php?view=scrap">Scrap Battery</a>
-            <a class="btn" href="battery_inventory.php?view=history">History</a>
-        </div>
-
         <div class="card">
-            <?php if ($soldTodayCount > 0): ?>
-                <p class="text-center" style="font-size:13px; color:#166534; margin-top:6px;">
-                    You have sold <strong><?= $soldTodayCount ?></strong>
-                    battery<?= ($soldTodayCount === 1 ? '' : 'ies') ?> so far today.
-                </p>
-            <?php endif; ?>
-
-            <p class="text-center small-note" style="margin-top:10px;">
+            <p class="small-note text-center">
                 Logged in as <strong><?= htmlspecialchars($empName) ?></strong>
                 (<?= htmlspecialchars($empAAA) ?>).
             </p>
+        </div>
 
+        <div class="menu-grid">
+            <a class="btn" href="battery_inventory.php?view=menu">Battery Program</a>
             <?php if ($isManager): ?>
-                <div class="text-center mt-10">
-                    <a href="?view=manager_home" class="btn btn-secondary top-bar-btn">
-                        Manager Menu
-                    </a>
-                </div>
+                <a class="btn" href="?view=manager_home">Manager Menu</a>
             <?php endif; ?>
+        </div>
 
+        <div class="card">
             <div class="text-center mt-10">
                 <a href="?logout=1" class="btn btn-secondary top-bar-btn">
                     Logout
