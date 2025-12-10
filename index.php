@@ -1186,13 +1186,13 @@ if ($view === 'menu') {
                 </p>
             <?php endif; ?>
 
-            <p class="text-center small-note" style="margin-top:10px;">
+            <p class="text-center small-note mt-6">
                 Logged in as <strong><?= htmlspecialchars($empName) ?></strong>
                 (<?= htmlspecialchars($empAAA) ?>).
             </p>
 
             <?php if ($isManager): ?>
-                <div class="text-center mt-10">
+                <div class="text-center mt-6">
                     <a href="?view=manager_home" class="btn btn-secondary top-bar-btn">
                         Manager Menu
                     </a>
@@ -1245,7 +1245,6 @@ if ($view === 'menu') {
                 <div class="filters-actions">
                     <button type="submit" class="btn">Apply Filters</button>
                     <a class="btn btn-secondary" href="?view=inventory">Clear</a>
-                    <a class="btn btn-secondary" href="?view=menu">Menu</a>
                 </div>
             </form>
         </div>
@@ -1276,8 +1275,11 @@ if ($view === 'menu') {
         </div>
 
         <div class="card">
-            <div class="text-center mt-10">
+            <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -1334,8 +1336,11 @@ if ($view === 'menu') {
         <?php endif; ?>
 
         <div class="card">
-            <div class="text-center mt-10">
+            <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -1425,8 +1430,11 @@ if ($view === 'menu') {
         <?php endif; ?>
 
         <div class="card">
-            <div class="text-center mt-10">
+            <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -1493,8 +1501,11 @@ if ($view === 'menu') {
         <?php endif; ?>
 
         <div class="card">
-            <div class="text-center mt-10">
+            <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -1649,8 +1660,11 @@ if ($view === 'menu') {
         <?php endif; ?>
 
         <div class="card">
-            <div class="text-center mt-10">
+            <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -1693,8 +1707,11 @@ if ($view === 'menu') {
         </div>
 
         <div class="card">
-            <div class="text-center mt-10">
+            <div class="flex-row-between">
                 <a class="btn btn-secondary top-bar-btn" href="?view=menu">Back to Battery Menu</a>
+                <?php if ($isManager): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="?view=manager_home">Back to Manager Menu</a>
+                <?php endif; ?>
             </div>
         </div>
 
