@@ -9,11 +9,37 @@ if (!$dbHost || !$dbName || !$dbUser || !$dbPass) {
     die("Database environment variables are not set. Check Render env vars.");
 }
 
-// Timezone
+// Force PHP timezone to Eastern (handles EST/EDT automatically)
 date_default_timezone_set('America/New_York');
 
-// Session
+// Start session
 session_start();
+
+// ===== SESSION TIMEOUT (5 MINUTES) =====
+$timeoutSeconds = 300;
+if (isset($_SESSION['logged_in'])) {
+    if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > $timeoutSeconds)) {
+        // Session expired
+        $_SESSION = [];
+        if (ini_get("session.use_cookies")) {
+            $params = session_get_cookie_params();
+            setcookie(
+                session_name(),
+                '',
+                time() - 42000,
+                $params["path"],
+                $params["domain"],
+                $params["secure"],
+                $params["httponly"]
+            );
+        }
+        session_destroy();
+        header("Location: index.php?msg=timeout");
+        exit;
+    } else {
+        $_SESSION['last_activity'] = time();
+    }
+}
 
 // Must be logged in
 if (empty($_SESSION['logged_in'])) {
@@ -21,34 +47,11 @@ if (empty($_SESSION['logged_in'])) {
     exit;
 }
 
-// Session timeout (5 minutes) – mirror index.php
-$timeoutSeconds = 300;
-if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > $timeoutSeconds)) {
-    $_SESSION = [];
-    if (ini_get("session.use_cookies")) {
-        $params = session_get_cookie_params();
-        setcookie(
-            session_name(),
-            '',
-            time() - 42000,
-            $params["path"],
-            $params["domain"],
-            $params["secure"],
-            $params["httponly"]
-        );
-    }
-    session_destroy();
-    header("Location: index.php?msg=timeout");
-    exit;
-} else {
-    $_SESSION['last_activity'] = time();
-}
-
-// Session vars
+// ===== WE HAVE A LOGGED IN USER =====
 $empAAA         = $_SESSION['empAAA']        ?? 'WEBUSER';
-$empName        = $_SESSION['empName']       ?? 'Tuna Marie';
+$empName        = $_SESSION['empName']       ?? 'User';
 $isManager      = !empty($_SESSION['empManager']);
-$isDispatchOnly = !empty($_SESSION['isDispatchOnly'] ?? 0);
+$isDispatchOnly = !empty($_SESSION['isDispatchOnly']);
 
 // ===== CONNECT TO DB =====
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
@@ -62,16 +65,16 @@ try {
 }
 
 // ===== ROUTING / STATE =====
-// views: inventory | sell | transfer | scrap | stocktruck | history
-$requestedView = $_GET['view'] ?? 'inventory';
+// views: menu | inventory | sell | transfer | scrap | stocktruck | history
+$requestedView = $_GET['view'] ?? 'menu';
+$msg           = $_GET['msg']  ?? '';
+
+// Dispatch-only user: force inventory view, ignore any requested view
 if ($isDispatchOnly) {
-    // DISPATCH can only see inventory summary
     $view = 'inventory';
 } else {
     $view = $requestedView;
 }
-
-$msg  = $_GET['msg']  ?? '';
 
 // Predeclare vars
 $invRows        = [];
@@ -93,6 +96,9 @@ $scrapInfo       = null;
 
 $historyRows     = [];
 
+$soldTodayCount  = 0;
+
+// Stock Truck
 $stockTruckError             = "";
 $stockTruckMessage           = "";
 $stockTruckSelectedTruck     = "";
@@ -162,7 +168,7 @@ if ($view === 'inventory') {
 }
 
 // ===== SELL BATTERY SECTION =====
-if ($view === 'sell') {
+if ($view === 'sell' && !$isDispatchOnly) {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Step 1: Lookup
@@ -250,8 +256,7 @@ if ($view === 'sell') {
 
                         $pdo->commit();
 
-                        // Return to main menu on index with message
-                        header("Location: index.php?view=menu&msg=sold");
+                        header("Location: battery_inventory.php?view=menu&msg=sold");
                         exit;
 
                     } catch (Exception $e) {
@@ -265,7 +270,7 @@ if ($view === 'sell') {
 }
 
 // ===== TRANSFER BATTERY SECTION =====
-if ($view === 'transfer') {
+if ($view === 'transfer' && !$isDispatchOnly) {
     // Build combined destination list: shops + trucks
     $stmtDest = $pdo->query("
         SELECT Location AS ToLoc, 'SHOP' AS Type
@@ -429,7 +434,7 @@ if ($view === 'transfer') {
 }
 
 // ===== SCRAP BATTERY SECTION =====
-if ($view === 'scrap') {
+if ($view === 'scrap' && !$isDispatchOnly) {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Step 1: Lookup battery
@@ -525,7 +530,7 @@ if ($view === 'scrap') {
 
                             $pdo->commit();
 
-                            header("Location: index.php?view=menu&msg=scrapped");
+                            header("Location: battery_inventory.php?view=menu&msg=scrapped");
                             exit;
 
                         } catch (Exception $e) {
@@ -541,7 +546,7 @@ if ($view === 'scrap') {
 }
 
 // ===== STOCK TRUCK SECTION =====
-if ($view === 'stocktruck') {
+if ($view === 'stocktruck' && !$isDispatchOnly) {
     $stmtTrucks = $pdo->query("
         SELECT Truck
         FROM Trucks
@@ -809,7 +814,7 @@ if ($view === 'stocktruck') {
 }
 
 // ===== HISTORY SECTION =====
-if ($view === 'history') {
+if ($view === 'history' && !$isDispatchOnly) {
     try {
         $stmtHist = $pdo->prepare("
             SELECT 
@@ -832,12 +837,37 @@ if ($view === 'history') {
         $historyRows = [];
     }
 }
+
+// ===== SOLD TODAY COUNT (MENU ONLY, BASED ON EST/EDT) =====
+if ($view === 'menu' && !$isDispatchOnly) {
+    try {
+        $startToday = date('Y-m-d 00:00:00');
+        $endToday   = date('Y-m-d 23:59:59');
+
+        $stmtSold = $pdo->prepare("
+            SELECT COUNT(*) AS cnt
+            FROM AuditLog
+            WHERE EmployeeID = :empId
+              AND ToLoc = 'SOLD'
+              AND LastUpdate >= :startToday
+              AND LastUpdate <= :endToday
+        ");
+        $stmtSold->execute([
+            ':empId'      => $empAAA,
+            ':startToday' => $startToday,
+            ':endToday'   => $endToday,
+        ]);
+        $soldTodayCount = (int)$stmtSold->fetchColumn();
+    } catch (Exception $e) {
+        $soldTodayCount = 0;
+    }
+}
 ?>
 <!doctype html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Browns Towing – Battery Inventory</title>
+    <title>Browns Towing Battery Program</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {
@@ -852,6 +882,17 @@ if ($view === 'history') {
         .container {
             max-width: 900px;
             margin: 0 auto;
+        }
+        .menu-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        @media (min-width: 600px) {
+            .menu-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
         }
         .btn {
             display: inline-block;
@@ -910,7 +951,7 @@ if ($view === 'history') {
                 align-items: center;
             }
         }
-        select, input[type="text"], textarea, input[type="number"] {
+        select, input[type="text"], textarea {
             padding: 6px;
             border-radius: 4px;
             border: 1px solid #d1d5db;
@@ -925,7 +966,6 @@ if ($view === 'history') {
             display: flex;
             gap: 6px;
             margin-top: 6px;
-            flex-wrap: wrap;
         }
         .text-center {
             text-align: center;
@@ -965,10 +1005,6 @@ if ($view === 'history') {
         .top-bar-btn {
             max-width:200px;
         }
-        .btn-small {
-            padding: 4px 8px;
-            font-size: 12px;
-        }
     </style>
 </head>
 <body>
@@ -976,12 +1012,69 @@ if ($view === 'history') {
 
     <h1>Browns Towing Battery Program</h1>
 
-    <?php if ($view === 'inventory'): ?>
+    <?php if (!$isDispatchOnly): ?>
+        <?php if ($msg === 'sold'): ?>
+            <div class="msg msg-success">
+                Battery was successfully sold and logged.
+            </div>
+        <?php elseif ($msg === 'transferred'): ?>
+            <div class="msg msg-success">
+                Battery was successfully transferred and logged.
+            </div>
+        <?php elseif ($msg === 'scrapped'): ?>
+            <div class="msg msg-success">
+                Battery was successfully scrapped and logged.
+            </div>
+        <?php endif; ?>
+    <?php endif; ?>
+
+    <?php if (!$isDispatchOnly && $view === 'menu'): ?>
+
+        <h2>Main Battery Menu</h2>
+
+        <div class="menu-grid">
+            <a class="btn" href="battery_inventory.php?view=inventory">Inventory</a>
+            <a class="btn" href="battery_inventory.php?view=sell">Sell Battery</a>
+            <a class="btn" href="battery_inventory.php?view=stocktruck">Stock Truck</a>
+            <a class="btn" href="battery_inventory.php?view=transfer">Transfer Battery</a>
+            <a class="btn" href="battery_inventory.php?view=scrap">Scrap Battery</a>
+            <a class="btn" href="battery_inventory.php?view=history">History</a>
+        </div>
+
+        <div class="card">
+            <?php if ($soldTodayCount > 0): ?>
+                <p class="text-center" style="font-size:13px; color:#166534; margin-top:6px;">
+                    You have sold <strong><?= $soldTodayCount ?></strong>
+                    battery<?= ($soldTodayCount === 1 ? '' : 'ies') ?> so far today.
+                </p>
+            <?php endif; ?>
+
+            <p class="text-center small-note" style="margin-top:10px;">
+                Logged in as <strong><?= htmlspecialchars($empName) ?></strong>
+                (<?= htmlspecialchars($empAAA) ?>).
+            </p>
+
+            <?php if ($isManager): ?>
+                <div class="text-center mt-10">
+                    <a href="index.php?view=manager_home" class="btn btn-secondary top-bar-btn">
+                        Manager Menu
+                    </a>
+                </div>
+            <?php endif; ?>
+
+            <div class="text-center mt-10">
+                <a href="index.php?logout=1" class="btn btn-secondary top-bar-btn">
+                    Logout
+                </a>
+            </div>
+        </div>
+
+    <?php elseif ($view === 'inventory'): ?>
 
         <h2>Inventory Summary</h2>
 
         <div class="card">
-            <form method="get">
+            <form method="get" action="battery_inventory.php">
                 <input type="hidden" name="view" value="inventory">
 
                 <div class="filter-row">
@@ -1015,6 +1108,9 @@ if ($view === 'history') {
                 <div class="filters-actions">
                     <button type="submit" class="btn">Apply Filters</button>
                     <a class="btn btn-secondary" href="battery_inventory.php?view=inventory">Clear</a>
+                    <?php if (!$isDispatchOnly): ?>
+                        <a class="btn btn-secondary" href="battery_inventory.php?view=menu">Menu</a>
+                    <?php endif; ?>
                 </div>
             </form>
         </div>
@@ -1047,18 +1143,16 @@ if ($view === 'history') {
         <div class="card">
             <div class="text-center mt-10">
                 <?php if ($isDispatchOnly): ?>
-                    <a class="btn btn-secondary top-bar-btn" href="index.php?logout=1">
-                        Logout
-                    </a>
+                    <a class="btn btn-secondary top-bar-btn" href="index.php?logout=1">Logout</a>
                 <?php else: ?>
-                    <a class="btn btn-secondary top-bar-btn" href="index.php?view=menu">
+                    <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
                         Back to Battery Menu
                     </a>
                 <?php endif; ?>
             </div>
         </div>
 
-    <?php elseif ($view === 'sell'): ?>
+    <?php elseif ($view === 'sell' && !$isDispatchOnly): ?>
 
         <h2>Sell a Battery</h2>
 
@@ -1103,11 +1197,13 @@ if ($view === 'history') {
 
         <div class="card">
             <div class="text-center mt-10">
-                <a class="btn btn-secondary top-bar-btn" href="index.php?view=menu">Back to Battery Menu</a>
+                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
+                    Back to Battery Menu
+                </a>
             </div>
         </div>
 
-    <?php elseif ($view === 'transfer'): ?>
+    <?php elseif ($view === 'transfer' && !$isDispatchOnly): ?>
 
         <h2>Transfer a Battery</h2>
 
@@ -1185,11 +1281,13 @@ if ($view === 'history') {
 
         <div class="card">
             <div class="text-center mt-10">
-                <a class="btn btn-secondary top-bar-btn" href="index.php?view=menu">Back to Battery Menu</a>
+                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
+                    Back to Battery Menu
+                </a>
             </div>
         </div>
 
-    <?php elseif ($view === 'scrap'): ?>
+    <?php elseif ($view === 'scrap' && !$isDispatchOnly): ?>
 
         <h2>Scrap a Battery</h2>
 
@@ -1244,11 +1342,13 @@ if ($view === 'history') {
 
         <div class="card">
             <div class="text-center mt-10">
-                <a class="btn btn-secondary top-bar-btn" href="index.php?view=menu">Back to Battery Menu</a>
+                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
+                    Back to Battery Menu
+                </a>
             </div>
         </div>
 
-    <?php elseif ($view === 'stocktruck'): ?>
+    <?php elseif ($view === 'stocktruck' && !$isDispatchOnly): ?>
 
         <h2>Stock Truck</h2>
 
@@ -1391,11 +1491,13 @@ if ($view === 'history') {
 
         <div class="card">
             <div class="text-center mt-10">
-                <a class="btn btn-secondary top-bar-btn" href="index.php?view=menu">Back to Battery Menu</a>
+                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
+                    Back to Battery Menu
+                </a>
             </div>
         </div>
 
-    <?php elseif ($view === 'history'): ?>
+    <?php elseif ($view === 'history' && !$isDispatchOnly): ?>
 
         <h2>History</h2>
 
@@ -1435,21 +1537,20 @@ if ($view === 'history') {
 
         <div class="card">
             <div class="text-center mt-10">
-                <a class="btn btn-secondary top-bar-btn" href="index.php?view=menu">Back to Battery Menu</a>
+                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
+                    Back to Battery Menu
+                </a>
             </div>
         </div>
 
     <?php else: ?>
 
-        <h2>Unknown View</h2>
-        <div class="card">
-            <p class="text-center">
-                Something went wrong. Use the menu to go back.
-            </p>
-            <div class="mt-10 text-center">
-                <a class="btn" href="index.php?view=menu">Back to Menu</a>
-            </div>
-        </div>
+        <!-- Should not really happen now; for safety, send to menu or inventory -->
+        <?php if ($isDispatchOnly): ?>
+            <?php header("Location: battery_inventory.php?view=inventory"); exit; ?>
+        <?php else: ?>
+            <?php header("Location: battery_inventory.php?view=menu"); exit; ?>
+        <?php endif; ?>
 
     <?php endif; ?>
 
