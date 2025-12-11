@@ -15,43 +15,17 @@ date_default_timezone_set('America/New_York');
 // Start session
 session_start();
 
-// ===== SESSION TIMEOUT (5 MINUTES) =====
-$timeoutSeconds = 300;
-if (isset($_SESSION['logged_in'])) {
-    if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > $timeoutSeconds)) {
-        // Session expired
-        $_SESSION = [];
-        if (ini_get("session.use_cookies")) {
-            $params = session_get_cookie_params();
-            setcookie(
-                session_name(),
-                '',
-                time() - 42000,
-                $params["path"],
-                $params["domain"],
-                $params["secure"],
-                $params["httponly"]
-            );
-        }
-        session_destroy();
-        header("Location: index.php?msg=timeout");
-        exit;
-    } else {
-        $_SESSION['last_activity'] = time();
-    }
-}
-
 // Must be logged in
 if (empty($_SESSION['logged_in'])) {
     header("Location: index.php");
     exit;
 }
 
-// ===== WE HAVE A LOGGED IN USER =====
-$empAAA         = $_SESSION['empAAA']        ?? 'WEBUSER';
-$empName        = $_SESSION['empName']       ?? 'User';
-$isManager      = !empty($_SESSION['empManager']);
-$isDispatchOnly = !empty($_SESSION['isDispatchOnly']);
+// Pull session info
+$empAAA      = $_SESSION['empAAA']       ?? 'WEBUSER';
+$empName     = $_SESSION['empName']      ?? 'User';
+$isManager   = !empty($_SESSION['empManager']);
+$isDispatch  = !empty($_SESSION['empIsDispatch']);   // set in index.php when AAA = DISPATCH
 
 // ===== CONNECT TO DB =====
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4";
@@ -65,16 +39,22 @@ try {
 }
 
 // ===== ROUTING / STATE =====
-// views: menu | inventory | sell | transfer | scrap | stocktruck | history
-$requestedView = $_GET['view'] ?? 'menu';
-$msg           = $_GET['msg']  ?? '';
+// Valid views: menu | inventory | sell | transfer | scrap | stocktruck | history
+$viewParam = $_GET['view'] ?? 'menu';
 
-// Dispatch-only user: force inventory view, ignore any requested view
-if ($isDispatchOnly) {
+// Dispatch users are locked to Inventory Summary only
+if ($isDispatch) {
     $view = 'inventory';
 } else {
-    $view = $requestedView;
+    $view = $viewParam;
 }
+
+$allowedViews = ['menu','inventory','sell','transfer','scrap','stocktruck','history'];
+if (!in_array($view, $allowedViews, true)) {
+    $view = 'unknown';
+}
+
+$msg  = $_GET['msg']  ?? '';
 
 // Predeclare vars
 $invRows        = [];
@@ -168,7 +148,7 @@ if ($view === 'inventory') {
 }
 
 // ===== SELL BATTERY SECTION =====
-if ($view === 'sell' && !$isDispatchOnly) {
+if ($view === 'sell') {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Step 1: Lookup
@@ -240,9 +220,13 @@ if ($view === 'sell' && !$isDispatchOnly) {
                         // Insert AuditLog
                         $insert = $pdo->prepare("
                             INSERT INTO AuditLog
-                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity)
+                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice,
+                                 Battery, DateCode, Reason, Location, Computer, LastUpdate,
+                                 StockType, Quantity)
                             VALUES
-                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'Battery Sale', '', :battery, :dateCode, '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
+                                (:empId, :empName, :fromLoc, 'SOLD', :batteryId, 'Battery Sale',
+                                 '', :battery, :dateCode, '', 'MOBILE', 'MOBILE',
+                                 :lastUpdate, 'BATTERY', 1)
                         ");
                         $insert->execute([
                             ':empId'      => $empAAA,
@@ -270,7 +254,7 @@ if ($view === 'sell' && !$isDispatchOnly) {
 }
 
 // ===== TRANSFER BATTERY SECTION =====
-if ($view === 'transfer' && !$isDispatchOnly) {
+if ($view === 'transfer') {
     // Build combined destination list: shops + trucks
     $stmtDest = $pdo->query("
         SELECT Location AS ToLoc, 'SHOP' AS Type
@@ -402,9 +386,13 @@ if ($view === 'transfer' && !$isDispatchOnly) {
                         // Insert AuditLog
                         $insert = $pdo->prepare("
                             INSERT INTO AuditLog
-                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity)
+                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice,
+                                 Battery, DateCode, Reason, Location, Computer, LastUpdate,
+                                 StockType, Quantity)
                             VALUES
-                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
+                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '',
+                                 :battery, :dateCode, '', 'MOBILE', 'MOBILE',
+                                 :lastUpdate, 'BATTERY', 1)
                         ");
                         $insert->execute([
                             ':empId'      => $empAAA,
@@ -434,7 +422,7 @@ if ($view === 'transfer' && !$isDispatchOnly) {
 }
 
 // ===== SCRAP BATTERY SECTION =====
-if ($view === 'scrap' && !$isDispatchOnly) {
+if ($view === 'scrap') {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Step 1: Lookup battery
@@ -513,9 +501,13 @@ if ($view === 'scrap' && !$isDispatchOnly) {
 
                             $insert = $pdo->prepare("
                                 INSERT INTO AuditLog
-                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity)
+                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice,
+                                     Battery, DateCode, Reason, Location, Computer, LastUpdate,
+                                     StockType, Quantity)
                                 VALUES
-                                    (:empId, :empName, :fromLoc, 'SCRAPPED', :batteryId, 'Scrap', '', :battery, :dateCode, :reason, 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
+                                    (:empId, :empName, :fromLoc, 'SCRAPPED', :batteryId, 'Scrap', '',
+                                     :battery, :dateCode, :reason, 'MOBILE', 'MOBILE',
+                                     :lastUpdate, 'BATTERY', 1)
                             ");
                             $insert->execute([
                                 ':empId'      => $empAAA,
@@ -546,7 +538,7 @@ if ($view === 'scrap' && !$isDispatchOnly) {
 }
 
 // ===== STOCK TRUCK SECTION =====
-if ($view === 'stocktruck' && !$isDispatchOnly) {
+if ($view === 'stocktruck') {
     $stmtTrucks = $pdo->query("
         SELECT Truck
         FROM Trucks
@@ -687,9 +679,13 @@ if ($view === 'stocktruck' && !$isDispatchOnly) {
 
                             $insert = $pdo->prepare("
                                 INSERT INTO AuditLog
-                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity)
+                                    (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice,
+                                     Battery, DateCode, Reason, Location, Computer, LastUpdate,
+                                     StockType, Quantity)
                                 VALUES
-                                    (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '', :battery, :dateCode, '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
+                                    (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'Transfer', '',
+                                     :battery, :dateCode, '', 'MOBILE', 'MOBILE',
+                                     :lastUpdate, 'BATTERY', 1)
                             ");
                             $insert->execute([
                                 ':empId'      => $empAAA,
@@ -767,9 +763,13 @@ if ($view === 'stocktruck' && !$isDispatchOnly) {
 
                         $insAudit = $pdo->prepare("
                             INSERT INTO AuditLog
-                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice, Battery, DateCode, Reason, Location, Computer, LastUpdate, StockType, Quantity)
+                                (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice,
+                                 Battery, DateCode, Reason, Location, Computer, LastUpdate,
+                                 StockType, Quantity)
                             VALUES
-                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'ClearTruck', '', :battery, :dateCode, '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
+                                (:empId, :empName, :fromLoc, :toLoc, :batteryId, 'ClearTruck', '',
+                                 :battery, :dateCode, '', 'MOBILE', 'MOBILE',
+                                 :lastUpdate, 'BATTERY', 1)
                         ");
 
                         $now = date('Y-m-d H:i:s');
@@ -814,7 +814,7 @@ if ($view === 'stocktruck' && !$isDispatchOnly) {
 }
 
 // ===== HISTORY SECTION =====
-if ($view === 'history' && !$isDispatchOnly) {
+if ($view === 'history') {
     try {
         $stmtHist = $pdo->prepare("
             SELECT 
@@ -839,7 +839,7 @@ if ($view === 'history' && !$isDispatchOnly) {
 }
 
 // ===== SOLD TODAY COUNT (MENU ONLY, BASED ON EST/EDT) =====
-if ($view === 'menu' && !$isDispatchOnly) {
+if ($view === 'menu') {
     try {
         $startToday = date('Y-m-d 00:00:00');
         $endToday   = date('Y-m-d 23:59:59');
@@ -1012,25 +1012,23 @@ if ($view === 'menu' && !$isDispatchOnly) {
 
     <h1>Browns Towing Battery Program</h1>
 
-    <?php if (!$isDispatchOnly): ?>
-        <?php if ($msg === 'sold'): ?>
-            <div class="msg msg-success">
-                Battery was successfully sold and logged.
-            </div>
-        <?php elseif ($msg === 'transferred'): ?>
-            <div class="msg msg-success">
-                Battery was successfully transferred and logged.
-            </div>
-        <?php elseif ($msg === 'scrapped'): ?>
-            <div class="msg msg-success">
-                Battery was successfully scrapped and logged.
-            </div>
-        <?php endif; ?>
+    <?php if ($msg === 'sold'): ?>
+        <div class="msg msg-success">
+            Battery was successfully sold and logged.
+        </div>
+    <?php elseif ($msg === 'transferred'): ?>
+        <div class="msg msg-success">
+            Battery was successfully transferred and logged.
+        </div>
+    <?php elseif ($msg === 'scrapped'): ?>
+        <div class="msg msg-success">
+            Battery was successfully scrapped and logged.
+        </div>
     <?php endif; ?>
 
-    <?php if (!$isDispatchOnly && $view === 'menu'): ?>
+    <?php if ($view === 'menu'): ?>
 
-        <h2>Main Battery Menu</h2>
+        <h2>Battery Menu</h2>
 
         <div class="menu-grid">
             <a class="btn" href="battery_inventory.php?view=inventory">Inventory</a>
@@ -1056,7 +1054,7 @@ if ($view === 'menu' && !$isDispatchOnly) {
 
             <?php if ($isManager): ?>
                 <div class="text-center mt-10">
-                    <a href="index.php?view=manager_home" class="btn btn-secondary top-bar-btn">
+                    <a href="index.php" class="btn btn-secondary top-bar-btn">
                         Manager Menu
                     </a>
                 </div>
@@ -1108,9 +1106,6 @@ if ($view === 'menu' && !$isDispatchOnly) {
                 <div class="filters-actions">
                     <button type="submit" class="btn">Apply Filters</button>
                     <a class="btn btn-secondary" href="battery_inventory.php?view=inventory">Clear</a>
-                    <?php if (!$isDispatchOnly): ?>
-                        <a class="btn btn-secondary" href="battery_inventory.php?view=menu">Menu</a>
-                    <?php endif; ?>
                 </div>
             </form>
         </div>
@@ -1142,8 +1137,10 @@ if ($view === 'menu' && !$isDispatchOnly) {
 
         <div class="card">
             <div class="text-center mt-10">
-                <?php if ($isDispatchOnly): ?>
-                    <a class="btn btn-secondary top-bar-btn" href="index.php?logout=1">Logout</a>
+                <?php if ($isDispatch): ?>
+                    <a class="btn btn-secondary top-bar-btn" href="index.php?logout=1">
+                        Logout
+                    </a>
                 <?php else: ?>
                     <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
                         Back to Battery Menu
@@ -1152,7 +1149,7 @@ if ($view === 'menu' && !$isDispatchOnly) {
             </div>
         </div>
 
-    <?php elseif ($view === 'sell' && !$isDispatchOnly): ?>
+    <?php elseif ($view === 'sell'): ?>
 
         <h2>Sell a Battery</h2>
 
@@ -1165,9 +1162,18 @@ if ($view === 'menu' && !$isDispatchOnly) {
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
-                <input type="text" name="battery_id"
-                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
-                       placeholder="Enter BatteryID">
+                <div style="display:flex; gap:6px;">
+                    <input type="text" name="battery_id" id="sell_battery_id"
+                           style="flex:1;"
+                           value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                           placeholder="Enter or Scan BatteryID">
+                    <button type="button"
+                            onclick="openScanner('sell_battery_id')"
+                            class="btn"
+                            style="width:auto; padding:0 10px;">
+                        Scan
+                    </button>
+                </div>
                 <button type="submit" name="lookup_battery" class="btn mt-10">
                     Lookup Battery
                 </button>
@@ -1197,13 +1203,11 @@ if ($view === 'menu' && !$isDispatchOnly) {
 
         <div class="card">
             <div class="text-center mt-10">
-                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
-                    Back to Battery Menu
-                </a>
+                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">Back to Battery Menu</a>
             </div>
         </div>
 
-    <?php elseif ($view === 'transfer' && !$isDispatchOnly): ?>
+    <?php elseif ($view === 'transfer'): ?>
 
         <h2>Transfer a Battery</h2>
 
@@ -1222,9 +1226,18 @@ if ($view === 'menu' && !$isDispatchOnly) {
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
-                <input type="text" name="battery_id"
-                       value="<?= htmlspecialchars($transferBatteryId ?? '') ?>"
-                       placeholder="Enter BatteryID">
+                <div style="display:flex; gap:6px;">
+                    <input type="text" name="battery_id" id="transfer_battery_id"
+                           style="flex:1;"
+                           value="<?= htmlspecialchars($transferBatteryId ?? '') ?>"
+                           placeholder="Enter or Scan BatteryID">
+                    <button type="button"
+                            onclick="openScanner('transfer_battery_id')"
+                            class="btn"
+                            style="width:auto; padding:0 10px;">
+                        Scan
+                    </button>
+                </div>
 
                 <label class="label-block mt-10">Transfer To</label>
                 <select name="to_loc">
@@ -1281,13 +1294,11 @@ if ($view === 'menu' && !$isDispatchOnly) {
 
         <div class="card">
             <div class="text-center mt-10">
-                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
-                    Back to Battery Menu
-                </a>
+                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">Back to Battery Menu</a>
             </div>
         </div>
 
-    <?php elseif ($view === 'scrap' && !$isDispatchOnly): ?>
+    <?php elseif ($view === 'scrap'): ?>
 
         <h2>Scrap a Battery</h2>
 
@@ -1300,9 +1311,18 @@ if ($view === 'menu' && !$isDispatchOnly) {
         <div class="card">
             <form method="post">
                 <label class="label-block">BatteryID</label>
-                <input type="text" name="battery_id"
-                       value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
-                       placeholder="Enter BatteryID">
+                <div style="display:flex; gap:6px;">
+                    <input type="text" name="battery_id" id="scrap_battery_id"
+                           style="flex:1;"
+                           value="<?= isset($_POST['battery_id']) ? htmlspecialchars($_POST['battery_id']) : '' ?>"
+                           placeholder="Enter or Scan BatteryID">
+                    <button type="button"
+                            onclick="openScanner('scrap_battery_id')"
+                            class="btn"
+                            style="width:auto; padding:0 10px;">
+                        Scan
+                    </button>
+                </div>
 
                 <button type="submit" name="lookup_battery" class="btn mt-10">
                     Lookup Battery
@@ -1342,13 +1362,11 @@ if ($view === 'menu' && !$isDispatchOnly) {
 
         <div class="card">
             <div class="text-center mt-10">
-                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
-                    Back to Battery Menu
-                </a>
+                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">Back to Battery Menu</a>
             </div>
         </div>
 
-    <?php elseif ($view === 'stocktruck' && !$isDispatchOnly): ?>
+    <?php elseif ($view === 'stocktruck'): ?>
 
         <h2>Stock Truck</h2>
 
@@ -1429,9 +1447,18 @@ if ($view === 'menu' && !$isDispatchOnly) {
                     <input type="hidden" name="truck" value="<?= htmlspecialchars($stockTruckSelectedTruck) ?>">
 
                     <label class="label-block">BatteryID</label>
-                    <input type="text" name="battery_id"
-                           value="<?= htmlspecialchars($stockTruckTransferBatteryId ?? '') ?>"
-                           placeholder="Enter BatteryID">
+                    <div style="display:flex; gap:6px;">
+                        <input type="text" name="battery_id" id="stocktruck_transfer_battery_id"
+                               style="flex:1;"
+                               value="<?= htmlspecialchars($stockTruckTransferBatteryId ?? '') ?>"
+                               placeholder="Enter or Scan BatteryID">
+                        <button type="button"
+                                onclick="openScanner('stocktruck_transfer_battery_id')"
+                                class="btn"
+                                style="width:auto; padding:0 10px;">
+                            Scan
+                        </button>
+                    </div>
 
                     <button type="submit" name="transfer_to_truck" class="btn mt-10">
                         Transfer Battery to <?= htmlspecialchars($stockTruckSelectedTruck) ?>
@@ -1491,13 +1518,11 @@ if ($view === 'menu' && !$isDispatchOnly) {
 
         <div class="card">
             <div class="text-center mt-10">
-                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
-                    Back to Battery Menu
-                </a>
+                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">Back to Battery Menu</a>
             </div>
         </div>
 
-    <?php elseif ($view === 'history' && !$isDispatchOnly): ?>
+    <?php elseif ($view === 'history'): ?>
 
         <h2>History</h2>
 
@@ -1537,23 +1562,207 @@ if ($view === 'menu' && !$isDispatchOnly) {
 
         <div class="card">
             <div class="text-center mt-10">
-                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">
-                    Back to Battery Menu
-                </a>
+                <a class="btn btn-secondary top-bar-btn" href="battery_inventory.php?view=menu">Back to Battery Menu</a>
             </div>
         </div>
 
     <?php else: ?>
 
-        <!-- Should not really happen now; for safety, send to menu or inventory -->
-        <?php if ($isDispatchOnly): ?>
-            <?php header("Location: battery_inventory.php?view=inventory"); exit; ?>
-        <?php else: ?>
-            <?php header("Location: battery_inventory.php?view=menu"); exit; ?>
-        <?php endif; ?>
+        <h2>Unknown View</h2>
+        <div class="card">
+            <p class="text-center">
+                Something went wrong. Use the menu to go back.
+            </p>
+            <div class="mt-10 text-center">
+                <a class="btn" href="battery_inventory.php?view=menu">Back to Menu</a>
+            </div>
+        </div>
 
     <?php endif; ?>
 
 </div>
+
+<!-- Barcode Scanner Modal -->
+<div id="scannerOverlay" style="
+    display:none;
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.8);
+    z-index:9999;
+    align-items:center;
+    justify-content:center;
+">
+    <div style="background:#fff; padding:10px; border-radius:8px; max-width:400px; width:90%; text-align:center;">
+        <h3 style="margin-top:0;">Scan Battery Barcode</h3>
+        <video id="scannerVideo" style="width:100%; max-height:300px; background:#000;"></video>
+        <p style="font-size:12px; color:#6b7280; margin-top:6px;">
+            Align the barcode within the frame until it is detected.
+        </p>
+        <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
+            <button type="button" onclick="switchCamera()" style="
+                padding:8px 12px;
+                border:none;
+                border-radius:6px;
+                background:#2563eb;
+                color:#fff;
+            ">
+                Switch Camera
+            </button>
+            <button type="button" onclick="closeScanner()" style="
+                padding:8px 12px;
+                border:none;
+                border-radius:6px;
+                background:#4b5563;
+                color:#fff;
+            ">
+                Cancel
+            </button>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/@zxing/library@latest"></script>
+<script>
+    let selectedInputId = null;
+    let codeReader = null;
+    let videoInputDevices = [];
+    let currentDeviceIndex = 0;
+    let currentStream = null;
+    let audioCtx = null;
+
+    function playBeep() {
+        try {
+            if (!audioCtx) {
+                const AC = window.AudioContext || window.webkitAudioContext;
+                if (!AC) return;
+                audioCtx = new AC();
+            }
+            const duration = 0.15;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        } catch (e) {
+            console.warn('Beep failed:', e);
+        }
+    }
+
+    function stopCurrentStream() {
+        const video = document.getElementById('scannerVideo');
+        if (currentStream) {
+            currentStream.getTracks().forEach(t => t.stop());
+            currentStream = null;
+        }
+        if (video) {
+            video.srcObject = null;
+        }
+    }
+
+    async function startDecodingWithCurrentDevice() {
+        if (!videoInputDevices.length) return;
+        const device = videoInputDevices[currentDeviceIndex];
+        const deviceId = device.deviceId;
+
+        stopCurrentStream();
+
+        try {
+            const video = document.getElementById('scannerVideo');
+            codeReader.decodeFromVideoDevice(deviceId, 'scannerVideo', (result, err) => {
+                if (result) {
+                    const input = document.getElementById(selectedInputId);
+                    if (input) {
+                        input.value = result.text;
+                    }
+                    playBeep();
+                    closeScanner();
+                }
+            });
+
+            setTimeout(() => {
+                if (video && video.srcObject) {
+                    currentStream = video.srcObject;
+                }
+            }, 500);
+
+        } catch (e) {
+            console.error('Error starting decode:', e);
+            alert('Unable to start camera. Please check permissions.');
+            closeScanner();
+        }
+    }
+
+    function pickBackCameraIndex(devices) {
+        let idx = devices.findIndex(d =>
+            /back|rear|environment/i.test(d.label)
+        );
+        if (idx !== -1) return idx;
+
+        idx = devices.findIndex(d =>
+            !/front|user/i.test(d.label)
+        );
+        if (idx !== -1) return idx;
+
+        return 0;
+    }
+
+    async function openScanner(inputId) {
+        selectedInputId = inputId;
+        const overlay = document.getElementById('scannerOverlay');
+        overlay.style.display = 'flex';
+
+        if (!codeReader) {
+            codeReader = new ZXing.BrowserMultiFormatReader();
+        }
+
+        try {
+            videoInputDevices = await codeReader.listVideoInputDevices();
+            if (!videoInputDevices.length) {
+                alert('No camera found on this device.');
+                closeScanner();
+                return;
+            }
+
+            currentDeviceIndex = pickBackCameraIndex(videoInputDevices);
+            await startDecodingWithCurrentDevice();
+        } catch (e) {
+            console.error(e);
+            alert('Unable to access camera. Please check permissions.');
+            closeScanner();
+        }
+    }
+
+    function switchCamera() {
+        if (!videoInputDevices.length || !codeReader) return;
+        try {
+            codeReader.reset();
+        } catch (e) {
+            console.warn(e);
+        }
+        stopCurrentStream();
+        currentDeviceIndex = (currentDeviceIndex + 1) % videoInputDevices.length;
+        startDecodingWithCurrentDevice();
+    }
+
+    function closeScanner() {
+        const overlay = document.getElementById('scannerOverlay');
+        overlay.style.display = 'none';
+
+        if (codeReader) {
+            try {
+                codeReader.reset();
+            } catch (e) {
+                console.warn(e);
+            }
+        }
+        stopCurrentStream();
+    }
+</script>
 </body>
 </html>
