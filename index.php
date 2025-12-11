@@ -315,6 +315,12 @@ if (!$isManager) {
     </div>
 
     <div class="card">
+        <a href="shop_inventory.php" class="btn btn-primary">
+            Shop Inventory
+        </a>
+    </div>
+
+    <div class="card">
         <a href="?logout=1" class="btn btn-secondary">Logout</a>
     </div>
 </div>
