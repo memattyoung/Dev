@@ -5,7 +5,6 @@ $dbName = getenv('BROWNS_DB_NAME');
 $dbUser = getenv('BROWNS_DB_USER');
 $dbPass = getenv('BROWNS_DB_PASS');
 
-// Optional sanity check while we're setting this up:
 if (!$dbHost || !$dbName || !$dbUser || !$dbPass) {
     die("Database environment variables are not set. Check Render env vars.");
 }
@@ -18,7 +17,6 @@ session_start();
 
 // ===== LOGOUT HANDLER =====
 if (isset($_GET['logout'])) {
-    // Clear session data
     $_SESSION = [];
     if (ini_get("session.use_cookies")) {
         $params = session_get_cookie_params();
@@ -33,7 +31,7 @@ if (isset($_GET['logout'])) {
         );
     }
     session_destroy();
-    header("Location: " . $_SERVER['PHP_SELF']);
+    header("Location: index.php");
     exit;
 }
 
@@ -41,7 +39,6 @@ if (isset($_GET['logout'])) {
 $timeoutSeconds = 300; // 5 minutes
 if (isset($_SESSION['logged_in'])) {
     if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > $timeoutSeconds)) {
-        // Session expired
         $_SESSION = [];
         if (ini_get("session.use_cookies")) {
             $params = session_get_cookie_params();
@@ -56,23 +53,20 @@ if (isset($_SESSION['logged_in'])) {
             );
         }
         session_destroy();
-        header("Location: " . $_SERVER['PHP_SELF'] . "?msg=timeout");
+        header("Location: index.php?msg=timeout");
         exit;
     } else {
-        // Still active, refresh timer
         $_SESSION['last_activity'] = time();
     }
 }
 
-// ===== LOGIN GATE (NO OUTPUT BEFORE THIS POINT) =====
-if (!isset($_SESSION['logged_in'])) {
+// ===== LOGIN GATE =====
+if (empty($_SESSION['logged_in'])) {
     $error = "";
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        // Force AAA to uppercase so DISPATCH matches regardless of casing
-        $aaaInput = trim($_POST['aaa'] ?? '');
-        $aaa      = strtoupper($aaaInput);
-        $pwd      = trim($_POST['password'] ?? '');
+        $aaa = strtoupper(trim($_POST['aaa'] ?? ''));
+        $pwd = trim($_POST['password'] ?? '');
 
         if ($aaa === '' || $pwd === '') {
             $error = "Please enter both AAA and Password.";
@@ -86,7 +80,7 @@ if (!isset($_SESSION['logged_in'])) {
                 $sqlEmp = "
                     SELECT AAA, FirstName, LastName, Manager
                     FROM Employee
-                    WHERE AAA = :aaa
+                    WHERE UPPER(AAA) = :aaa
                       AND Password = :pwd
                 ";
                 $stmtEmp = $pdoLogin->prepare($sqlEmp);
@@ -97,19 +91,19 @@ if (!isset($_SESSION['logged_in'])) {
                 $emp = $stmtEmp->fetch(PDO::FETCH_ASSOC);
 
                 if ($emp) {
-                    $empId   = $emp['AAA'];
+                    $empId   = $emp['AAA']; // keep stored value as-is
                     $empName = $emp['FirstName'] . " " . $emp['LastName'];
                     $now     = date('Y-m-d H:i:s'); // EST/EDT local time
 
                     // Insert AuditLog record for Log On
                     $insertLogin = $pdoLogin->prepare("
                         INSERT INTO AuditLog
-                            (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type,
-                             Invoice, Battery, DateCode, Reason, Location, Computer,
-                             LastUpdate, StockType, Quantity) 
+                            (EmployeeID, Employee, FromLoc, ToLoc, BatteryID, Type, Invoice,
+                             Battery, DateCode, Reason, Location, Computer, LastUpdate,
+                             StockType, Quantity)
                         VALUES
-                            (:empId, :empName, '', '', '', 'Log On', '',
-                             '', '', '', 'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
+                            (:empId, :empName, '', '', '', 'Log On', '', '', '', '',
+                             'MOBILE', 'MOBILE', :lastUpdate, 'BATTERY', 1)
                     ");
                     $insertLogin->execute([
                         ':empId'      => $empId,
@@ -123,19 +117,26 @@ if (!isset($_SESSION['logged_in'])) {
                     $_SESSION['empFirst']       = $emp['FirstName'];
                     $_SESSION['empLast']        = $emp['LastName'];
                     $_SESSION['empName']        = $empName;
-                    $_SESSION['empManager']     = (int)($emp['Manager'] ?? 0);   // Manager flag
-                    $_SESSION['isDispatchOnly'] = (strtoupper($empId) === 'DISPATCH');
-                    $_SESSION['last_activity']  = time(); // start timeout timer
+                    $_SESSION['empManager']     = (int)($emp['Manager'] ?? 0);
+                    $_SESSION['empIsDispatch']  = (strtoupper($empId) === 'DISPATCH') ? 1 : 0;
+                    $_SESSION['last_activity']  = time();
 
-                    // If DISPATCH, go straight to inventory-only view
-                    if ($_SESSION['isDispatchOnly']) {
-                        header("Location: battery_inventory.php?view=inventory");
+                    // Role-based redirect after login
+                    if (!empty($_SESSION['empIsDispatch'])) {
+                        header("Location: battery_inventory.php?view=inventory&readonly=1");
                         exit;
                     }
 
-                    // Everyone else lands on this main index menu
-                    header("Location: " . $_SERVER['PHP_SELF']);
+                    if (!empty($_SESSION['empManager'])) {
+                        // Manager goes to main menu
+                        header("Location: index.php");
+                        exit;
+                    }
+
+                    // Regular non-manager goes straight to full battery program
+                    header("Location: battery_inventory.php");
                     exit;
+
                 } else {
                     $error = "Invalid AAA or Password.";
                 }
@@ -150,67 +151,108 @@ if (!isset($_SESSION['logged_in'])) {
     <html>
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta charset="utf-8">
         <title>Browns Towing Battery Program Login</title>
+        <style>
+            body {
+                font-family: system-ui, -apple-system, sans-serif;
+                background: #f9fafb;
+                margin: 0;
+                padding: 10px;
+            }
+            .container {
+                max-width: 420px;
+                margin: 40px auto;
+                background: #ffffff;
+                border-radius: 8px;
+                padding: 16px 18px 20px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            }
+            h2 {
+                text-align: center;
+                margin-top: 0;
+            }
+            label {
+                font-weight: 600;
+                display:block;
+                margin-top:8px;
+            }
+            input[type="text"], input[type="password"] {
+                width: 100%;
+                padding: 8px;
+                margin-top: 4px;
+                border-radius: 4px;
+                border: 1px solid #d1d5db;
+                box-sizing: border-box;
+            }
+            button {
+                width: 100%;
+                padding: 10px;
+                margin-top: 12px;
+                background: #2563eb;
+                border: none;
+                border-radius: 6px;
+                color: #fff;
+                font-size: 16px;
+            }
+            .msg {
+                margin-top: 8px;
+                font-size: 14px;
+            }
+            .msg-error { color:#b91c1c; }
+            .msg-info  { color:#92400e; }
+        </style>
     </head>
-    <body style="font-family:sans-serif; max-width:400px; margin:40px auto;">
-        <h2 style="text-align:center;">Browns Towing Battery Program Login</h2>
+    <body>
+    <div class="container">
+        <h2>Browns Towing Battery Program Login</h2>
 
         <?php if (isset($_GET['msg']) && $_GET['msg'] === 'timeout'): ?>
-            <p style="color:orange;">
+            <p class="msg msg-info">
                 Your session has expired due to inactivity. Please log in again.
             </p>
         <?php endif; ?>
 
         <?php if (!empty($error)): ?>
-            <p style="color:red;"><?= htmlspecialchars($error) ?></p>
+            <p class="msg msg-error"><?= htmlspecialchars($error) ?></p>
         <?php endif; ?>
+
         <form method="post">
-            <label>AAA:</label><br>
+            <label>AAA:</label>
             <input type="text" name="aaa"
-                   style="width:100%; padding:8px; margin:8px 0;"
                    value="<?= isset($_POST['aaa']) ? htmlspecialchars($_POST['aaa']) : '' ?>">
 
-            <label>Password:</label><br>
-            <input type="password" name="password"
-                   style="width:100%; padding:8px; margin:8px 0;">
+            <label>Password:</label>
+            <input type="password" name="password">
 
-            <button type="submit" style="width:100%; padding:10px;">Enter</button>
+            <button type="submit">Enter</button>
         </form>
+    </div>
     </body>
     </html>
     <?php
     exit;
 }
 
-// ===== WE HAVE A LOGGED IN USER =====
-$empAAA         = $_SESSION['empAAA']        ?? 'WEBUSER';
-$empName        = $_SESSION['empName']       ?? 'User';
-$isManager      = !empty($_SESSION['empManager']);
-$isDispatchOnly = !empty($_SESSION['isDispatchOnly']);
+// ===== IF WE REACH HERE, USER IS ALREADY LOGGED IN =====
+$empAAA       = $_SESSION['empAAA']    ?? 'WEBUSER';
+$empName      = $_SESSION['empName']   ?? 'User';
+$isManager    = !empty($_SESSION['empManager']);
+$isDispatch   = !empty($_SESSION['empIsDispatch']);
 
-// If dispatch-only, always force them straight into inventory-only screen
-if ($isDispatchOnly) {
-    header("Location: battery_inventory.php?view=inventory");
+// Dispatch users: always go straight to read-only inventory
+if ($isDispatch) {
+    header("Location: battery_inventory.php?view=inventory&readonly=1");
     exit;
 }
 
-// ===== ROUTING / STATE (for non-dispatch users) =====
-$view = $_GET['view'] ?? ($isManager ? 'manager_home' : 'menu');
-$msg  = $_GET['msg']  ?? '';
-
-// Old battery views that used to live on index.php -> redirect to battery_inventory.php
-$legacyBatteryViews = ['inventory', 'sell', 'transfer', 'scrap', 'stocktruck', 'history'];
-if (in_array($view, $legacyBatteryViews, true)) {
-    // Preserve view only; params like loc/bat are already on query string when coming from battery pages
-    header("Location: battery_inventory.php?view=" . urlencode($view));
+// Regular non-manager: always go straight to full battery program
+if (!$isManager) {
+    header("Location: battery_inventory.php");
     exit;
 }
 
-// Any unknown view just falls back to menu
-if ($view !== 'manager_home' && $view !== 'menu') {
-    $view = 'menu';
-}
-
+// Managers only: show Main Menu
 ?>
 <!doctype html>
 <html>
@@ -225,127 +267,56 @@ if ($view !== 'manager_home' && $view !== 'menu') {
             padding: 10px;
             background: #f9fafb;
         }
-        h1, h2 {
-            text-align: center;
-        }
+        h1, h2 { text-align:center; }
         .container {
-            max-width: 900px;
+            max-width: 700px;
             margin: 0 auto;
         }
-        .menu-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        @media (min-width: 600px) {
-            .menu-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
+        .card {
+            background:#ffffff;
+            border-radius:8px;
+            padding:16px;
+            box-shadow:0 1px 3px rgba(0,0,0,0.1);
+            margin-top:12px;
         }
         .btn {
-            display: inline-block;
-            text-align: center;
-            padding: 12px;
-            background: #2563eb;
-            color: #fff;
-            text-decoration: none;
-            border-radius: 6px;
-            font-size: 16px;
-            border: none;
-            width: 100%;
-            box-sizing: border-box;
+            display:block;
+            width:100%;
+            padding:12px;
+            text-align:center;
+            border-radius:6px;
+            border:none;
+            font-size:16px;
+            text-decoration:none;
+            box-sizing:border-box;
         }
-        .btn-secondary {
-            background: #4b5563;
-        }
-        .btn:active {
-            transform: scale(0.98);
-        }
-        .card {
-            background: #ffffff;
-            border-radius: 8px;
-            padding: 12px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-top: 12px;
-        }
-        .text-center {
-            text-align: center;
-        }
-        .small-note {
-            font-size: 12px;
-            color: #6b7280;
-        }
-        .mt-10 { margin-top: 10px; }
-        .top-bar-btn {
-            max-width:200px;
-        }
-        .flex-row-between {
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            gap:8px;
-            flex-wrap:wrap;
-        }
+        .btn-primary { background:#2563eb; color:#fff; }
+        .btn-secondary { background:#4b5563; color:#fff; max-width:250px; margin:0 auto; }
+        .btn:active { transform:scale(0.98); }
+        .small-note { font-size:13px; color:#6b7280; text-align:center; }
     </style>
 </head>
 <body>
 <div class="container">
-
     <h1>Browns Towing Battery Program</h1>
+    <h2>Main Menu</h2>
 
-    <?php if ($view === 'manager_home'): ?>
+    <div class="card">
+        <p class="small-note">
+            Logged in as <strong><?= htmlspecialchars($empName) ?></strong>
+            (<?= htmlspecialchars($empAAA) ?>).
+        </p>
+    </div>
 
-        <h2>Manager Menu</h2>
+    <div class="card">
+        <a href="battery_inventory.php" class="btn btn-primary">
+            Battery Program
+        </a>
+    </div>
 
-        <div class="card">
-            <p class="text-center" style="font-size:13px; color:#6b7280;">
-                Logged in as <strong><?= htmlspecialchars($empName) ?></strong>
-                (<?= htmlspecialchars($empAAA) ?>) – Manager.
-            </p>
-        </div>
-
-        <div class="menu-grid">
-            <a class="btn" href="shop_inventory.php">Shop Inventory</a>
-            <a class="btn" href="battery_inventory.php?view=menu">Battery Program</a>
-        </div>
-
-        <div class="card">
-            <div class="text-center mt-10">
-                <a href="?logout=1" class="btn btn-secondary top-bar-btn">
-                    Logout
-                </a>
-            </div>
-        </div>
-
-    <?php elseif ($view === 'menu'): ?>
-
-        <h2>Main Menu</h2>
-
-        <div class="card">
-            <p class="small-note text-center">
-                Logged in as <strong><?= htmlspecialchars($empName) ?></strong>
-                (<?= htmlspecialchars($empAAA) ?>).
-            </p>
-        </div>
-
-        <div class="menu-grid">
-            <a class="btn" href="battery_inventory.php?view=menu">Battery Program</a>
-            <?php if ($isManager): ?>
-                <a class="btn" href="?view=manager_home">Manager Menu</a>
-            <?php endif; ?>
-        </div>
-
-        <div class="card">
-            <div class="text-center mt-10">
-                <a href="?logout=1" class="btn btn-secondary top-bar-btn">
-                    Logout
-                </a>
-            </div>
-        </div>
-
-    <?php endif; ?>
-
+    <div class="card">
+        <a href="?logout=1" class="btn btn-secondary">Logout</a>
+    </div>
 </div>
 </body>
 </html>
