@@ -152,7 +152,7 @@ if (empty($_SESSION['logged_in'])) {
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta charset="utf-8">
-        <title>Browns Towing Battery Program Login</title>
+        <title>Browns Towing Login</title>
         <style>
             body {
                 font-family: system-ui, -apple-system, sans-serif;
@@ -258,7 +258,7 @@ if (!$isManager) {
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Browns Towing Battery Program</title>
+    <title>Browns Towing  Managers Menu</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {
@@ -298,7 +298,7 @@ if (!$isManager) {
 </head>
 <body>
 <div class="container">
-    <h1>Browns Towing Battery Program</h1>
+    <h1>Browns Towing</h1>
     <h2>Main Menu</h2>
 
     <div class="card">
