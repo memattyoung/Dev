@@ -123,6 +123,7 @@ if (empty($_SESSION['logged_in'])) {
 
                     // Role-based redirect after login
                     if (!empty($_SESSION['empIsDispatch'])) {
+                        // Dispatch goes to read-only battery inventory
                         header("Location: battery_inventory.php?view=inventory&readonly=1");
                         exit;
                     }
@@ -174,8 +175,8 @@ if (empty($_SESSION['logged_in'])) {
             }
             label {
                 font-weight: 600;
-                display:block;
-                margin-top:8px;
+                display: block;
+                margin-top: 8px;
             }
             input[type="text"], input[type="password"] {
                 width: 100%;
@@ -199,13 +200,13 @@ if (empty($_SESSION['logged_in'])) {
                 margin-top: 8px;
                 font-size: 14px;
             }
-            .msg-error { color:#b91c1c; }
-            .msg-info  { color:#92400e; }
+            .msg-error { color: #b91c1c; }
+            .msg-info  { color: #92400e; }
         </style>
     </head>
     <body>
     <div class="container">
-        <h2>Browns Towing Battery Program Login</h2>
+        <h2>Browns Towing Login</h2>
 
         <?php if (isset($_GET['msg']) && $_GET['msg'] === 'timeout'): ?>
             <p class="msg msg-info">
@@ -235,10 +236,10 @@ if (empty($_SESSION['logged_in'])) {
 }
 
 // ===== IF WE REACH HERE, USER IS ALREADY LOGGED IN =====
-$empAAA       = $_SESSION['empAAA']    ?? 'WEBUSER';
-$empName      = $_SESSION['empName']   ?? 'User';
-$isManager    = !empty($_SESSION['empManager']);
-$isDispatch   = !empty($_SESSION['empIsDispatch']);
+$empAAA     = $_SESSION['empAAA']   ?? 'WEBUSER';
+$empName    = $_SESSION['empName']  ?? 'User';
+$isManager  = !empty($_SESSION['empManager']);
+$isDispatch = !empty($_SESSION['empIsDispatch']);
 
 // Dispatch users: always go straight to read-only inventory
 if ($isDispatch) {
@@ -252,13 +253,13 @@ if (!$isManager) {
     exit;
 }
 
-// Managers only: show Main Menu
+// Managers only: show Manager Menu
 ?>
 <!doctype html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Browns Towing  Managers Menu</title>
+    <title>Browns Towing Manager Menu</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {
@@ -267,39 +268,47 @@ if (!$isManager) {
             padding: 10px;
             background: #f9fafb;
         }
-        h1, h2 { text-align:center; }
+        h1, h2 { text-align: center; }
         .container {
             max-width: 700px;
             margin: 0 auto;
         }
         .card {
-            background:#ffffff;
-            border-radius:8px;
-            padding:16px;
-            box-shadow:0 1px 3px rgba(0,0,0,0.1);
-            margin-top:12px;
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-top: 12px;
         }
         .btn {
-            display:block;
-            width:100%;
-            padding:12px;
-            text-align:center;
-            border-radius:6px;
-            border:none;
-            font-size:16px;
-            text-decoration:none;
-            box-sizing:border-box;
+            display: block;
+            width: 100%;
+            padding: 12px;
+            text-align: center;
+            border-radius: 6px;
+            border: none;
+            font-size: 16px;
+            text-decoration: none;
+            box-sizing: border-box;
         }
-        .btn-primary { background:#2563eb; color:#fff; }
-        .btn-secondary { background:#4b5563; color:#fff; max-width:250px; margin:0 auto; }
-        .btn:active { transform:scale(0.98); }
-        .small-note { font-size:13px; color:#6b7280; text-align:center; }
+        .btn-primary { background: #2563eb; color: #fff; }
+        .btn-secondary {
+            background: #4b5563;
+            color: #fff;
+            max-width: 250px;
+            margin: 0 auto;
+        }
+        .btn:active { transform: scale(0.98); }
+        .small-note {
+            font-size: 13px;
+            color: #6b7280;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>Browns Towing</h1>
-    <h2>Main Menu</h2>
+    <h1>Browns Towing Manager Menu</h1>
 
     <div class="card">
         <p class="small-note">
